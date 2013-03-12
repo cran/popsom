@@ -1,0 +1,11 @@
+1468b563605b97710efb802615c6e0c6 *DESCRIPTION
+ab463b7cf47f125f46878853b4be5e41 *NAMESPACE
+c7943bd802c985664abfcd6e26f5ca86 *R/map-utils.R
+eee2ec26a41c52f2fdf56bd0d0155f59 *man/map.build.Rd
+7a1179e239441e502959e062fd8c3247 *man/map.convergence.Rd
+97747f0890ab103d850fefb43f7f7d94 *man/map.feature.Rd
+e47b44c07febc731d539fee25267a14d *man/map.projection.Rd
+0e059debff0bb3a9b416f35d81773294 *man/map.significance.Rd
+f3d2a4f9631c47ebccfbe16495656776 *man/map.starburst.Rd
+286a190a7a5ac3c824e8ba35d41baa45 *man/map.umat.Rd
+a5c6baba79bebb78e2fe71ebcdcb72d4 *man/popsom-internal.Rd
