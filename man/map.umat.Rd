@@ -8,7 +8,7 @@ map.umat(map)
 \arguments{
   \item{map}{an object of type 'map'.}
 }
-\author{Gregory Breard}
+\author{Lutz Hamel, Benjamin Ott, Gregory Breard}
 \examples{
 data(iris)
 

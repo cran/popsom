@@ -1,6 +1,6 @@
 ### map-utils.r 
-# version 2.2
-# (c) 2009-2012 Lutz Hamel, University of Rhode Island
+# version 2.3
+# (c) 2009-2013 Lutz Hamel, Benjamin Ott, Greg Breard, University of Rhode Island
 #
 # This file constitues a set of routines which are useful in constructing
 # and evaluating self-organizing maps (SOMs).  The utilities are built around
@@ -19,6 +19,13 @@
 #	map.projection - print a table with the associations of labels with map elements
 #   map.feature - compute and display the enhanced unified distance matrix for a 
 #                 feature of the training data
+#
+### bug fixes
+#
+# lhh - put a check for the minimum dimensions of a map (2x2) - anything smaller is rejected.
+#     - labels now default to NULL.
+#     - map.convergence now has has a verb switch, in verbose mode it will return a vector of
+#       individua feature convergences.
 #
 ### Papers that document the theoretical aspects of this software package:
 #
@@ -69,9 +76,13 @@ require(graphics)
 # - an object of type 'map'
 
 # Hint: if your training data does not have any labels you can construct
-#       simple label vector as follows: labels <- 1:ncol(training.data)
+#       simple label vector as follows: labels <- 1:nrow(training.data)
 
-map.build <- function(data,labels,xdim=10,ydim=5,alpha=.6,train=1000) {
+map.build <- function(data,labels=NULL,xdim=10,ydim=5,alpha=.6,train=1000) {
+
+	# check if the dims are reasonable
+	if (xdim < 2 || ydim < 2)
+		stop("map.build: map is too small.")
 
 	# compute the initial neighborhood radius
 	r <- sqrt(xdim^2 + ydim^2)
@@ -105,6 +116,8 @@ map.build <- function(data,labels,xdim=10,ydim=5,alpha=.6,train=1000) {
 # parameters:
 # - map is an object if type 'map'
 # - conf.int is the confidence interval of the convergence test (default 95%)
+# - verb is switch that governs the return value false: single convergence value
+#   is returned, true: a vector of individual feature congences is returned.
 #
 # - return value is the convergence index of the map (variance captured by the map so far)
 
@@ -112,7 +125,7 @@ map.build <- function(data,labels,xdim=10,ydim=5,alpha=.6,train=1000) {
 #       maps with convergence of less than 90% are typically not trustworthy.  Of course,
 #       the precise cut-off depends on the noise level in your training data. 
 
-map.convergence <- function(map,conf.int=.95) {
+map.convergence <- function(map,conf.int=.95,verb=FALSE) {
 
 	 if (class(map) != "map")
 		stop("map.convergence: first argument is not a map object.")
@@ -131,16 +144,22 @@ map.convergence <- function(map,conf.int=.95) {
 	 # compute the variance captured by the map
 	 nfeatures <- ncol(map.df)
 	 prob.v <- map.significance(map,graphics=FALSE)
-	 var.sum <- 0
+     var.sum <- 0
 	 for (i in 1:nfeatures) {
-	 	if (l$conf.int.lo[i] <= 1.0 && l$conf.int.hi[i] >= 1.0) {
-				var.sum <- var.sum + prob.v[i]
-		#cat("Feature",i,":\t",as.real(l$ratio[i]),"\t(",l$conf.int.lo[i],"-",l$conf.int.hi[i],")\n")
-		}
+         #cat("Feature",i,":\t",l$ratio[i],"\t(",l$conf.int.lo[i],"-",l$conf.int.hi[i],")\n")
+         if (l$conf.int.lo[i] <= 1.0 && l$conf.int.hi[i] >= 1.0) 
+            var.sum <- var.sum + prob.v[i]
+         else
+            # not converged - zero out the probability
+            prob.v[i] <- 0
 	}
 
 	# return the variance captured by converged features
-	var.sum
+    
+    if (verb)
+       prob.v
+    else
+       var.sum
 }
 
 

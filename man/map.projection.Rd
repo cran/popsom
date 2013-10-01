@@ -9,7 +9,7 @@ map.projection(map)
   \item{map}{an object of type 'map'.}
 }
 \value{a dataframe containing the projection onto the map for each observation.}
-\author{Gregory Breard}
+\author{Lutz Hamel, Benjamin Ott, Gregory Breard}
 \examples{
 data(iris)
 

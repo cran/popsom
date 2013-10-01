@@ -10,8 +10,15 @@ map.significance(map, graphics = TRUE, feature.labels = TRUE)
   \item{graphics}{a switch that controls whether a plot is generated or not.}
   \item{feature.labels}{a switch to allow the plotting of feature names vs feature indices.}
 }
-\value{a vector containing the significance for each feature.}
-\author{Gregory Breard}
+\value{if graphics=FALS a vector containing the significance for each feature is returned.}
+\note{We use a Bayesian approach to compute the relative significance of features based on 
+variance.}
+
+\references{
+"Bayesian Probability Approach to Feature Significance for Infrared Spectra of Bacteria,"
+Lutz Hamel, Chris W. Brown, Applied Spectroscopy, Volume 66, Number 1, 2012.
+}
+\author{Lutz Hamel, Benjamin Ott, Gregory Breard}
 \examples{
 data(iris)
 
@@ -22,6 +29,9 @@ labels <- subset(iris,select=Species)
 ## build a map
 m <- map.build(df, labels, xdim=15, ydim=10, train=1000)
 
-## display the significance for the map
+## show the relative feature significance for each feature
+data.frame(names(df),map.significance(m,graphics=FALSE))
+
+## display the relative feature significance graphically
 map.significance(m)
 }

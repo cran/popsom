@@ -10,7 +10,16 @@ map.starburst(map, explicit = FALSE, smoothing = 2)
   \item{explicit}{controls the shape of the connected components.}
   \item{smoothing}{controls the smoothing level of the umat (NULL, 0, >0).}
 }
-\author{Gregory Breard}
+\note{We apply a gradient approach to the UMAT in order to compute the starburst visualization
+of the clusters.}
+
+\references{
+"Improved Interpretability of the Unified Distance Matrix with Connected Components,"
+Lutz Hamel and Chris W. Brown. Proceeding of the 7th International Conference on 
+Data Mining (DMIN'11), July 18-21, 2011, Las Vegas Nevada, USA, ISBN: 1-60132-168-6, pp338-343, 
+CSREA Press, 2011.
+}
+\author{Lutz Hamel, Benjamin Ott, Gregory Breard}
 \examples{
 data(iris)
 

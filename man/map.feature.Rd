@@ -11,7 +11,8 @@ map.feature(map, feature, explicit = FALSE, smoothing = 2)
   \item{explicit}{controls the shape of the connected components.}
   \item{smoothing}{controls the smoothing level of the umat (NULL, 0, >0).}
 }
-\author{Gregory Breard}
+\note{This essentially constructs a horizontal slice of the UMAT.}
+\author{Lutz Hamel, Benjamin Ott, Gregory Breard}
 \examples{
 data(iris)
 
