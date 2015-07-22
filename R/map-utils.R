@@ -1,15 +1,17 @@
 ### map-utils.r 
-# version 2.3
-# (c) 2009-2013 Lutz Hamel, Benjamin Ott, Greg Breard, University of Rhode Island
+# version 3.0
+# (c) 2009-2015 Lutz Hamel, Benjamin Ott, Greg Breard, University of Rhode Island
 #
 # This file constitues a set of routines which are useful in constructing
 # and evaluating self-organizing maps (SOMs).  The utilities are built around
 # the 'som' library available from the CRAN archive (see the package installer
 # and package manager).  The main utilities available in this file are:
 #	map.build - constructs a map
-#	map.convergence - reports the accuracy of the map in terms of modeling the 
+#   map.quality - reports two values: 1) embedding accuracy 2) topographic accuracy
+#	map.convergence - reports the accuracy of the map in terms of modeling the
 #                     underlying data distribution (100% if all feature distributions
 #                     are modeled correctly, 0% if none are)
+#   map.accuracy - reports the estimated topographic accuracy
 #	map.significance - graphically reports the significance of each feature with
 #                      respect to the self-organizing map model
 #	map.umat - displays the "unified distance matrix" (umat) of the SOM model (lighter
@@ -21,11 +23,14 @@
 #                 feature of the training data
 #
 ### bug fixes
+# lhh - 7/14/15 - added the topographic accuracy functionality.
 #
-# lhh - put a check for the minimum dimensions of a map (2x2) - anything smaller is rejected.
+# lhh - 12/4/13 - added two sample test for mean to the convergence test.
+#
+# lhh - 12/4/13 - put a check for the minimum dimensions of a map (2x2) - anything smaller is rejected.
 #     - labels now default to NULL.
 #     - map.convergence now has has a verb switch, in verbose mode it will return a vector of
-#       individua feature convergences.
+#       individual feature convergences.
 #
 ### Papers that document the theoretical aspects of this software package:
 #
@@ -110,8 +115,23 @@ map.build <- function(data,labels=NULL,xdim=10,ydim=5,alpha=.6,train=1000) {
 	m
 }
 
+### map.quality - measure the quality of a map
+#
+# parameters:
+# - map is an object if type 'map'
+# - conf.int is the confidence interval of the quality assessment (default 95%)
+# - k is the number of samples used for the estimated topographic accuracy computation
+#
+# - return value is a pair of values: 1) embedding accuracy 2) topographic accuracy
 
-### map.convergence - evaluate the convergence of a map using the F-test and 
+map.quality <- function(map,conf.int=.95,k=50) {
+    embedding.val <- map.convergence(map,conf.int,verb=FALSE)
+    accuracy.val <- map.accuracy(map,k,conf.int,verb=FALSE)
+    
+    list(embedding=embedding.val,accuracy=accuracy.val)
+}
+
+### map.convergence - evaluate the convergence of a map using the F-test and
 #                     a Bayesian estimate of the variance in the training data.
 # parameters:
 # - map is an object if type 'map'
@@ -139,29 +159,76 @@ map.convergence <- function(map,conf.int=.95,verb=FALSE) {
 	 data.df <- data.frame(map$data)
 
 	 # do the F-test on a pair of datasets: code vectors/training data
-	 l <- df.var.test(map.df,data.df,conf=conf.int)
+	 vl <- df.var.test(map.df,data.df,conf=conf.int)
 
-	 # compute the variance captured by the map
+	 # do the t-test on a pair of datasets: code vectors/training data
+	 ml <- df.mean.test(map.df,data.df,conf=conf.int)
+
+	 # compute the variance captured by the map -- but only if the means have converged as well.
 	 nfeatures <- ncol(map.df)
 	 prob.v <- map.significance(map,graphics=FALSE)
-     var.sum <- 0
+	 var.sum <- 0
 	 for (i in 1:nfeatures) {
-         #cat("Feature",i,":\t",l$ratio[i],"\t(",l$conf.int.lo[i],"-",l$conf.int.hi[i],")\n")
-         if (l$conf.int.lo[i] <= 1.0 && l$conf.int.hi[i] >= 1.0) 
-            var.sum <- var.sum + prob.v[i]
-         else
-            # not converged - zero out the probability
-            prob.v[i] <- 0
+            #cat("Feature",i,"variance:\t",vl$ratio[i],"\t(",vl$conf.int.lo[i],"-",vl$conf.int.hi[i],")\n")
+	    #cat("Feature",i,"mean:\t",ml$diff[i],"\t(",ml$conf.int.lo[i],"-",ml$conf.int.hi[i],")\n")
+            if (vl$conf.int.lo[i] <= 1.0 && vl$conf.int.hi[i] >= 1.0 &&
+	        ml$conf.int.lo[i] <= 0.0 && ml$conf.int.hi[i] >= 0.0) 
+               var.sum <- var.sum + prob.v[i]
+            else
+               # not converged - zero out the probability
+               prob.v[i] <- 0
 	}
 
 	# return the variance captured by converged features
-    
-    if (verb)
-       prob.v
-    else
-       var.sum
+	if (verb)
+       	   prob.v
+	else
+	   var.sum
 }
 
+### map.accuracy - measure the topographic accuracy of the map using sampling
+#
+# parameters:
+# - map is an object if type 'map'
+# - k is the number of samples used for the accuracy computation
+# - conf.int is the confidence interval of the accuracy test (default 95%)
+# - verb is switch that governs the return value, false: single accuracy value
+#   is returned, true: a vector of individual feature accuracies is returned.
+#
+# - return value is the estimated topographic accuracy
+
+map.accuracy <- function(map,k=50,conf.int=.95,verb=FALSE) {
+
+    if (class(map) != "map")
+        stop("map.accuracy: first argument is not a map object.")
+
+    # data.df is a dataframe that contain the training data
+    # note: map$data is what the 'som' package returns
+    data.df <- as.matrix(map$data)
+    
+    # sample map$data
+    if (k > nrow(data.df))
+        stop("map.accuracy: sample larger than training data.")
+    
+    data.sample.ix <- sample(1:nrow(data.df),size=k,replace=FALSE)
+
+    # compute the sum topographic accuracy - the accuracy of a sinle sample
+    # is 1 is the best matching unit is a neighbor otherwise it is 0
+    acc.v <- c()
+    for (i in 1:k) {
+        acc.v <- c(acc.v,accuracy(map,data.df[data.sample.ix[i],],data.sample.ix[i]))
+    }
+    
+    # compute the confidence interval values using the bootstrap
+    bval <- bootstrap(map,conf.int,data.df,k,acc.v)
+    
+    # the sum topographic accuracy is scaled by the number of samples - estimated
+    # topographic accuracy
+    if (verb)
+        acc.v
+    else
+        list(acc=sum(acc.v)/k,lo=bval$lo,hi=bval$hi)
+}
 
 ### map.starburst - compute and display the starburst representation of clusters
 # parameters:
@@ -300,6 +367,98 @@ map.significance <- function(map,graphics=TRUE,feature.labels=TRUE) {
 
 
 ############################### local functions #################################
+
+
+# bootstrap -- compute the topographic accuracies for the given confidence interval
+
+bootstrap <- function(map,conf.int,data.df,k,sample.acc.v) {
+    ix <- as.integer(100 - conf.int*100)
+    bn <- 200
+    
+    bootstrap.acc.v <- c(sum(sample.acc.v)/k)
+    
+    for (i in 2:bn) {
+        bs.v <- sample(1:k,size=k,replace=TRUE)
+        a <- sum(sample.acc.v[bs.v])/k
+        bootstrap.acc.v <- c(bootstrap.acc.v,a)
+    }
+    
+    bootstrap.acc.sort.v <- sort(bootstrap.acc.v)
+    
+    lo.val <- bootstrap.acc.sort.v[ix]
+    hi.val <- bootstrap.acc.sort.v[bn-ix]
+    
+    list(lo=lo.val,hi=hi.val)
+}
+
+
+# accuracy -- the topographic accuracy of a single sample is 1 is the best matching unit
+#             and the second best matching unit are are neighbors otherwise it is 0
+
+accuracy <- function(map,sample,data.ix) {
+
+    # note: map$code is what the 'som' package produces
+
+    # compute the euclidean distances of the sample from the code vectors
+    # and find the 2 best matching units for the sample
+    diff <- c()
+    for (i in 1:nrow(map$code)) {
+        diff <- c(diff,map$code[i,] - sample)
+    }
+    diff <- matrix(diff,nrow=nrow(map$code),ncol=ncol(map$code),byrow=TRUE)
+    diff.sq <- diff * diff
+    sums <- rowSums(diff.sq)
+    dist <- sqrt(sums)
+    order.ix <- order(dist)
+    best.ix <- order.ix[1]
+    second.best.ix <- order.ix[2]
+    
+    # sanity check
+    coord <- coordinate(map,best.ix)
+    coord.x <- coord[1]
+    coord.y <- coord[2]
+
+    map.x <- map$visual$x[data.ix] + 1
+    map.y <- map$visual$y[data.ix] + 1
+    map.rix <- rowix(map,map.x,map.y)
+ 
+    if (coord.x != map.x || coord.y != map.y || best.ix != map.rix){
+        cat("best.ix: ",best.ix," map.rix: ",map.rix,"\n")
+        stop("accuracy: problems with coordinates")
+    }
+    
+    # determine if the best and second best are neighbors on the map
+    best.xy <- coordinate(map,best.ix)
+    second.best.xy <- coordinate(map,second.best.ix)
+    diff.map <- best.xy - second.best.xy
+    diff.map.sq <- diff.map * diff.map
+    sum.map <- sum(diff.map.sq)
+    dist.map <- sqrt(sum.map)
+    
+    # it is a neighbor if the distance on the map
+    # between the bmu and 2bmu is less than 2
+    if (dist.map < 2)
+        1
+    else
+        0
+}
+
+# coordinate -- convert from a row index to a map xy-coordinate
+
+coordinate <- function(map,rowix) {
+    xdim <- map$xdim
+    x <- (rowix-1) %% xdim + 1
+    y <- (rowix-1) %/% xdim + 1
+    c(x,y)
+}
+
+#rowix -- convert from a map xy-coordinate to a row index
+
+rowix <- function(map,x,y) {
+    xdim <- map$xdim
+    rix <- (x-1) + (y-1)*xdim + 1
+    rix
+}
 
 # map.graphics.set -- set the graphics environment for our map utilities
 #                     the return value is the original graphics param vector 
@@ -926,24 +1085,53 @@ compute.heat <- function(map,d,smoothing=NULL) {
 # - conf - confidence level for the F-test (default .95)
 
 df.var.test <- function(df1,df2,conf = .95) {
-
+    
 	if (length(df1) != length(df2))
-		stop("df.var.test: cannot compare variances of data frames")
-
+    stop("df.var.test: cannot compare variances of data frames")
+    
 	# init our working arrays
 	var.ratio.v <- array(data=1,dim=length(df1))
 	var.confintlo.v <- array(data=1,dim=length(df1))
 	var.confinthi.v <- array(data=1,dim=length(df1))
 	
 	# compute the F-test on each feature in our populations
-	for (i in 1:length(df1)) { 
+	for (i in 1:length(df1)) {
 		t <- var.test(df1[[i]],df2[[i]],conf.level=conf)
 		var.ratio.v[i] <- t$estimate
 		#cat("Feature",i,"confidence interval =",t$conf.int,"\n")
 		var.confintlo.v[i] <- t$conf.int[1]
 		var.confinthi.v[i] <- t$conf.int[2]
 	}
-
+    
 	# return a list with the ratios and conf intervals for each feature
 	list(ratio=var.ratio.v,conf.int.lo=var.confintlo.v,conf.int.hi=var.confinthi.v)
+}
+
+### df.mean.test -- a function that applies the t-test testing the difference
+#                   of the means of the two data frames
+# parameters:
+# - df1,df2 - data frames with the same number of columns
+# - conf - confidence level for the t-test (default .95)
+
+df.mean.test <- function(df1,df2,conf = .95) {
+    
+	if (ncol(df1) != ncol(df2))
+    stop("df.mean.test: cannot compare means of data frames")
+    
+	# init our working arrays
+	mean.diff.v <- array(data=1,dim=ncol(df1))
+	mean.confintlo.v <- array(data=1,dim=ncol(df1))
+	mean.confinthi.v <- array(data=1,dim=ncol(df1))
+	
+	# compute the F-test on each feature in our populations
+	for (i in 1:ncol(df1)) {
+		t <- t.test(x=df1[[i]],y=df2[[i]],conf.level=conf)
+		mean.diff.v[i] <- t$estimate[1] - t$estimate[2]
+		#cat("Feature",i,"confidence interval =",t$conf.int,"\n")
+		mean.confintlo.v[i] <- t$conf.int[1]
+		mean.confinthi.v[i] <- t$conf.int[2]
+	}
+    
+	# return a list with the mean differences and conf intervals for each feature
+	list(diff=mean.diff.v,conf.int.lo=mean.confintlo.v,conf.int.hi=mean.confinthi.v)
 }

@@ -5,5 +5,7 @@ exportPattern(".")
 import(
   som,
   fields,
-  graphics	
+  graphics,
+  stats,
+  grDevices	
 )

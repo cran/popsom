@@ -10,7 +10,7 @@ map.significance(map, graphics = TRUE, feature.labels = TRUE)
   \item{graphics}{a switch that controls whether a plot is generated or not.}
   \item{feature.labels}{a switch to allow the plotting of feature names vs feature indices.}
 }
-\value{if graphics=FALS a vector containing the significance for each feature is returned.}
+\value{if graphics=FALSE a vector containing the significance for each feature is returned.}
 \note{We use a Bayesian approach to compute the relative significance of features based on 
 variance.}
 
