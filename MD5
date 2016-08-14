@@ -1,8 +1,8 @@
-68fa0b9333b9ff1e93ec337057cde967 *DESCRIPTION
+2da1ace917dd3addf6cf2b6e13c995e2 *DESCRIPTION
 0989b1887ec7fc6d20ad0d4ebabb066c *NAMESPACE
-63443d9acc3a87dca2f05cec83be334c *NEWS.md
-62c7ff8c1554d0a8af99f961427dd592 *R/map-utils.R
-c7494cd9d10ddf9b5021ca8ebe5582b4 *README.md
+4b679d7c5afc6a4ed4641f736790092e *NEWS.md
+9b71ac9bbf5a713a7afbac2817b5f614 *R/map-utils.R
+0c4887d1d854a131fe6f5cbefc417ebc *README.md
 7dd8ef120300cc3b1d28cb4a52c2d8e8 *man/map.accuracy.Rd
 ddef0e51b44e40670d09e764333f00d9 *man/map.build.Rd
 eee1a6d2a0a439183d99594c0a90610e *man/map.convergence.Rd
@@ -11,5 +11,5 @@ eee1a6d2a0a439183d99594c0a90610e *man/map.convergence.Rd
 e5db3376b5f5a2232980bd2885893762 *man/map.significance.Rd
 60b231aff6bccc912aa35392622e32ec *man/map.starburst.Rd
 16c3e33ffde18b1ba0b597e84e663302 *man/popsom-internal.Rd
-df377904822784ec5b516ea4549d085b *src/Makevars
-cda88611b81131baa1f84e964e2506d5 *src/vsom.f90
+c4926b675299a5d23e8aa2fd94ac3621 *src/Makevars
+335040928105eb4ab97007beedb6fd7d *src/vsom.f90
