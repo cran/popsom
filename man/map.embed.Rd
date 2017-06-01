@@ -1,14 +1,15 @@
-\name{map.embedding}
-\alias{map.embedding}
-\title{Compute the Map Embedding Accuracy}
+\name{map.embed}
+\alias{map.embed}
+\title{Map Embedding Accuracy}
 \description{Evaluates how well a map models the underlying training data distribution.}
 \usage{
-map.embedding(map, conf.int = 0.95, verb=FALSE)
+map.embed(map, conf.int = 0.95, verb=FALSE, ks=FALSE)
 }
 \arguments{
   \item{map}{an object of type 'map'.}
   \item{conf.int}{the confidence interval of the embedding test (default 95 percent).}
   \item{verb}{a switch controlling the structure of the output value (default=FALSE)}
+    \item{ks}{if true uses the Kolmogorov-Smirnov convergence test otherwise a convergence test based on variance and means is performed (default=FALSE)}
 }  
 \value{The embedding accuracy of the map.
 	If the switch verb=TRUE then a vector of the individual feature embedding accuracies are returned.
@@ -19,7 +20,7 @@ map.embedding(map, conf.int = 0.95, verb=FALSE)
 Lutz Hamel and Benjamin Ott. Proceeding of the 2012 International Conference on Data Mining (DMIN'12), 
 pp98-104, July 16-19, 2012, Las Vegas Nevada, USA. 
 }
-\author{Lutz Hamel, Benjamin Ott, Gregory Breard}
+\author{Lutz Hamel, Benjamin Ott, Gregory Breard, Robert Tatoian}
 \examples{
 data(iris)
 
@@ -31,8 +32,8 @@ labels <- subset(iris,select=Species)
 m <- map.build(df, labels, xdim=15, ydim=10, train=1000)
 
 ## display the embedding accuracy of the map
-map.embedding(m)
+map.embed(m)
 
 ## display the embedding accuracies of the individual features
-data.frame(names(df),map.embedding(m,verb=TRUE))
+data.frame(names(df),map.embed(m,verb=TRUE))
 }

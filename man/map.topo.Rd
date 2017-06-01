@@ -1,9 +1,9 @@
-\name{map.accuracy}
-\alias{map.accuracy}
+\name{map.topo}
+\alias{map.topo}
 \title{Estimated Topographical Accuracy}
 \description{Evaluate the topological quality of a SOM using the estimated topographical accuracy.}
 \usage{
-map.accuracy(map,k=50,conf.int = 0.95,verb=FALSE,interval=TRUE)
+map.topo(map,k=50,conf.int = 0.95,verb=FALSE,interval=TRUE)
 }
 \arguments{
   \item{map}{an object of type 'map'.}
@@ -34,6 +34,6 @@ labels <- subset(iris,select=Species)
 m <- map.build(df, labels, xdim=15, ydim=10, train=1000)
 
 ## display estimated topographical accuracy of the map
-map.accuracy(m)
+map.topo(m)
 
 }

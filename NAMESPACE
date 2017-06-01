@@ -1,12 +1,17 @@
-useDynLib(popsom)
-import(som,class,fields,graphics,stats,grDevices)
+useDynLib(popsom, .registration = TRUE)
+import(som,class,fields,graphics,ggplot2)
+importFrom("grDevices", "heat.colors")
+importFrom("stats", "dist", "ks.test", "runif", "t.test", "var", "var.test")
+importFrom("utils", "combn")
 export(
   "map.build",
   "map.convergence",
-  "map.embedding",
-  "map.accuracy",
+  "map.embed",
+  "map.topo",
   "map.starburst",
   "map.projection",
-  "map.significance"
+  "map.significance",
+  "map.neuron",
+  "map.marginal"
 )
 
