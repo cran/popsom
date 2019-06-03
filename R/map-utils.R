@@ -1539,7 +1539,7 @@ vsom.f <- function(data,xdim,ydim,alpha,train)
                        as.integer(ydim),
                        as.single(alpha),
                        as.integer(train),
-                       package="vsom")
+                       PACKAGE="popsom")
 
     # unpack the structure and list in result[1]
     v <- result[1]
