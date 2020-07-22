@@ -3,7 +3,7 @@
 \title{Generate Starburst For Map}
 \description{Computes and displays the starburst representation of clusters on a map.}
 \usage{
-map.starburst(map, explicit = FALSE, smoothing = 2, merge.clusters=TRUE, merge.range=.25)
+map.starburst(map, explicit = FALSE, smoothing = 2, merge.clusters=FALSE, merge.range=.25)
 }
 \arguments{
   \item{map}{an object of type 'map'.}

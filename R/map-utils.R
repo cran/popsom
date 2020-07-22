@@ -1,7 +1,7 @@
 ### map-utils.R
-# version 4.2
-# (c) 2009-2017 Lutz Hamel, Benjamin Ott, Greg Breard, University of Rhode Island
-#               with Robert Tatoian and Vishakh Gopu
+# version 4.3.0
+# (c) 2009-2020 Lutz Hamel, Benjamin Ott, Greg Breard, University of Rhode Island
+#               with Robert Tatoian, Vishakh Gopu, and Michael Eiger
 #
 # This file constitues a set of routines which are useful in constructing
 # and evaluating self-organizing maps (SOMs).
@@ -21,22 +21,6 @@
 # map.neuron -------- returns the contents of a neuron at (x,y) on the map as a vector
 # map.marginal ------ displays a density plot of a training dataframe dimension overlayed
 #                      with the neuron density for that same dimension or index.
-### bug fixes
-# rpt - 3/31/17 - added the Kolmogorov-Smirnov Test for map embeding.
-# rpt - 1/12/17 - added marginal visualization and incorperated cluster detection and merging functionality.
-# lhh - 1/6/17  - changed name to map.embed and map.topo to be consistent with the theory.
-#
-# lhh - 6/11/16 - added support for the vectorized version of SOM.
-#
-# lhh - 7/14/15 - added the topographic accuracy functionality.
-#
-# lhh - 12/4/13 - added two sample test for mean to the convergence test.
-#
-# lhh - 12/4/13 - put a check for the minimum dimensions of a map (2x2) - anything smaller is rejected.
-#     - labels now default to NULL.
-#     - map.convergence now has has a verb switch, in verbose mode it will return a vector of
-#       individual feature convergences.
-#
 #
 ### License
 # This program is free software; you can redistribute it and/or modify it under
@@ -189,13 +173,13 @@ map.build <- function(data,labels=NULL,xdim=10,ydim=5,alpha=.3,train=1000,algori
 #
 # - return value is the convergence index
 
-map.convergence <- function(map,conf.int=.95,k=50,verb=FALSE,ks = FALSE)
+map.convergence <- function(map,conf.int=.95,k=50,verb=FALSE,ks = TRUE)
 {
     if (ks)
       embed <- map.embed.ks(map,conf.int,verb=FALSE)
     else
       embed <- map.embed.vm(map,conf.int,verb=FALSE)
-  
+
     topo <- map.topo(map,k,conf.int,verb=FALSE,interval=FALSE)
 
     if (verb)
@@ -219,6 +203,12 @@ map.convergence <- function(map,conf.int=.95,k=50,verb=FALSE,ks = FALSE)
 #       the precise cut-off depends on the noise level in your training data.
 map.embed <- function(map,conf.int=.95,verb=FALSE,ks=FALSE)
 {
+	
+  .Deprecated(new = 'map.convergence', package = 'popsom', 
+  msg = '"map.embed" is being deprecated and has been flagged for removal in the next release of the popsom package. 
+Please consider using "map.convergence" with the argument verb = True to explicitly determine the embedding 
+accuracy of the map.')	
+
     if (ks)
         map.embed.ks(map,conf.int,verb)
     else
@@ -239,6 +229,12 @@ map.embed <- function(map,conf.int=.95,verb=FALSE,ks=FALSE)
 
 map.topo <- function(map,k=50,conf.int=.95,verb=FALSE,interval=TRUE)
 {
+	
+  .Deprecated(new = 'map.convergence', package = 'popsom', 
+  msg = '"map.topo" is being deprecated and has been flagged for removal in the next release of the popsom package. 
+Please consider using "map.convergence" with the argument verb = True to explicitly determine the estimated topographic 
+accuracy of the map.')
+	
     if (class(map) != "map")
         stop("map.topo: first argument is not a map object.")
 
@@ -291,7 +287,7 @@ map.topo <- function(map,k=50,conf.int=.95,verb=FALSE,interval=TRUE)
 #                 to determine whether components are closer to their centroids or
 #                 centroids closer to each other.
 
-map.starburst <- function(map,explicit=FALSE,smoothing=2,merge.clusters=TRUE,merge.range=.25)
+map.starburst <- function(map,explicit=FALSE,smoothing=2,merge.clusters=FALSE,merge.range=.25)
 {
 
 	if (class(map) != "map")
@@ -310,6 +306,9 @@ map.starburst <- function(map,explicit=FALSE,smoothing=2,merge.clusters=TRUE,mer
 
 map.projection <- function(map)
 {
+	
+.Deprecated(package = 'popsom', msg = '"map.projection" is being deprecated and has been flagged for removal in the next release of the popsom package.')
+	
 	if (class(map) != "map")
 		stop("map.projection: first argument is not a map object.")
 
@@ -430,41 +429,41 @@ map.marginal <- function(map,marginal)
   # ensure that map is a 'map' object
   if (class(map) != "map")
     stop("map.marginal: first argument is not a map object.")
-  
+
   # check if the second argument is of type character
   if (!typeof(marginal) == "character")
   {
     train <- data.frame(points = map$data[[marginal]])
     neurons <- data.frame(points = map$neurons[[marginal]])
-    
+
     train$legend <- 'training data'
     neurons$legend <- 'neurons'
-    
+
     hist <- rbind(train,neurons)
     ggplot(hist, aes(points, fill = legend)) + geom_density(alpha = 0.2) + xlab(names(map$data)[marginal])
-    
+
   }
   else if (marginal %in% names(map$data))
   {
-    
+
     train <- data.frame(points = map$data[names(map$data) == marginal])
     colnames(train) <- c("points")
-    
+
     neurons <- data.frame(points = map$neurons[names(map$neurons) == marginal])
     colnames(neurons) <- c("points")
-    
+
     train$legend <- 'training data'
     neurons$legend <- 'neurons'
-    
+
     hist <- rbind(train,neurons)
     ggplot(hist, aes(points, fill = legend)) + geom_density(alpha = 0.2) + xlab(marginal)
-    
+
   }
   else
   {
     stop("map.marginal: second argument is not the name of a training data frame dimension or index")
   }
-  
+
 }
 
 ############################### local functions #################################
@@ -473,22 +472,23 @@ map.marginal <- function(map,marginal)
 
 map.embed.vm <- function(map,conf.int=.95,verb=FALSE)
 {
+	
     if (class(map) != "map")
         stop("map.embed: first argument is not a map object.")
-    
+
     # map.df is a dataframe that contains the neurons
     map.df <- data.frame(map$neurons)
-    
+
     # data.df is a dataframe that contain the training data
     # note: map$data is what the 'som' package returns
     data.df <- data.frame(map$data)
-    
+
     # do the F-test on a pair of datasets: code vectors/training data
     vl <- df.var.test(map.df,data.df,conf=conf.int)
-    
+
     # do the t-test on a pair of datasets: code vectors/training data
     ml <- df.mean.test(map.df,data.df,conf=conf.int)
-    
+
     # compute the variance captured by the map -- but only if the means have converged as well.
     nfeatures <- ncol(map.df)
     prob.v <- map.significance(map,graphics=FALSE)
@@ -505,7 +505,7 @@ map.embed.vm <- function(map,conf.int=.95,verb=FALSE)
             prob.v[i] <- 0
         }
     }
-    
+
     # return the variance captured by converged features
     if (verb)
     prob.v
@@ -516,20 +516,20 @@ map.embed.vm <- function(map,conf.int=.95,verb=FALSE)
 # map.embed using the kolgomorov-smirnov test
 
 map.embed.ks <- function(map,conf.int=.95,verb=FALSE) {
-    
+	
     if (class(map) != "map") {
         stop("map.embed: first argument is not a map object.")
     }
-    
+
     # map.df is a dataframe that contains the neurons
     map.df <- data.frame(map$neurons)
-    
+
     # data.df is a dataframe that contain the training data
     # note: map$data is what the 'som' package returns
     data.df <- data.frame(map$data)
-    
+
     nfeatures <- ncol(map.df)
-    
+
     # use the Kolmogorov-Smirnov Test to test whether the neurons and training data appear
     # to come from the same distribution
     ks.vector <- NULL
@@ -537,10 +537,10 @@ map.embed.ks <- function(map,conf.int=.95,verb=FALSE) {
         # Note rpt - I needed to use suppress warnings to suppress the warning about ties.
         ks.vector[[i]] <- suppressWarnings(ks.test(map.df[[i]], data.df[[i]]))
     }
-    
+
     prob.v <- map.significance(map,graphics=FALSE)
     var.sum <- 0
-    
+
     # compute the variance captured by the map
     for (i in 1:nfeatures)
     {
@@ -552,13 +552,13 @@ map.embed.ks <- function(map,conf.int=.95,verb=FALSE) {
             prob.v[i] <- 0
         }
     }
-    
+
     # return the variance captured by converged features
     if (verb)
     prob.v
     else
     var.sum
-    
+
 }
 
 # map.normalize -- based on the som:normalize function but preserved names
@@ -1877,4 +1877,82 @@ new.centroid <- function(bmat, centroids, unique.centroids, map){
     }
   }
   components
+}
+
+
+avg.homogeneity <- function(map,explicit=FALSE,smoothing=2,merge=FALSE,merge.range=.25)
+{
+    ### keep an unaltered copy of the unified distance matrix,
+    ### required for merging the starburst clusters
+    umat <- compute.umat(map,smoothing=smoothing)
+
+    x <- map$xdim
+    y <- map$ydim
+    nobs <- nrow(map$data)
+    centroid.labels <- array(data=list(),dim=c(x,y))
+
+    ### need to make sure the map doesn't have a dimension of 1
+    if (x <= 1 || y <= 1)
+    {
+        stop("avg.homogeneity: map dimensions too small")
+    }
+
+    if (is.null(map$labels))
+    {
+	stop("avg.homogeneity: you need to attach labels to the map")
+    }
+
+   if(!merge)
+   {
+     # find the centroid for each neuron on the map
+     centroids <- compute.centroids(map,umat,explicit)
+   }
+   else
+   {
+     # find the unique centroids for the neurons on the map
+      centroids <- compute.combined.clusters(map,umat,explicit,merge.range)
+   }
+
+
+    ### attach labels to centroids
+    # count the labels in each map cell
+    for(i in 1:nobs)
+    {
+        lab <- as.character(map$labels[i,1])
+        nix <- map$visual[i]
+        c <- coordinate(map,nix)
+        ix <- c[1]
+        iy <- c[2]
+        cx <- centroids$centroid.x[ix,iy]
+        cy <- centroids$centroid.y[ix,iy]
+        centroid.labels[[cx,cy]] <- append(centroid.labels[[cx,cy]],lab)
+     }
+
+    ### compute average homogeneity of the map: h = (1/nobs)*sum_c majority.lahbel_c
+    sum.majority <- 0
+    n.centroids <- 0
+
+    for (ix in 1:x)
+    {
+	for (iy in 1:y)
+        {
+	    label.v <- centroid.labels[[ix,iy]]
+	    if (length(label.v)!=0)
+	    {
+		n.centroids <- n.centroids + 1
+		majority <- data.frame(sort(table(label.v),decreasing=TRUE))
+
+		if (nrow(majority) == 1) # only one label
+		{
+		   m.val <- length(label.v)
+		}
+		else
+		{
+		   m.val <- majority[1,2]
+		}
+		sum.majority <- sum.majority + m.val
+	    }
+	}
+    }
+    list(homog=sum.majority/nobs, nclust=n.centroids)
 }
