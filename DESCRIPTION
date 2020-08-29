@@ -1,6 +1,6 @@
 Package: popsom
-Version: 4.3.0
-Date: 2020-07-22
+Version: 4.3.1
+Date: 2020-08-29
 Title: Functions for Constructing and Evaluating Self-Organizing Maps
 Authors@R: c(person("Lutz", "Hamel", role = c("aut", "cre"), email = "lutzhamel@uri.edu"),
              person("Benjamin", "Ott", role = "aut"),
@@ -18,7 +18,7 @@ License: GPL
 URL: https://github.com/lutzhamel/popsom
 RoxygenNote: 7.1.1
 NeedsCompilation: yes
-Packaged: 2020-07-22 20:12:06 UTC; darkn
+Packaged: 2020-08-29 18:08:31 UTC; darkn
 Author: Lutz Hamel [aut, cre],
   Benjamin Ott [aut],
   Gregory Breard [aut],
@@ -26,4 +26,4 @@ Author: Lutz Hamel [aut, cre],
   Michael Eiger [aut],
   Vishakh Gopu [aut]
 Repository: CRAN
-Date/Publication: 2020-07-22 21:30:02 UTC
+Date/Publication: 2020-08-29 19:00:02 UTC
