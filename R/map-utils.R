@@ -1,26 +1,22 @@
 ### map-utils.R
-# version 4.3.1
-# (c) 2009-2020 Lutz Hamel, Benjamin Ott, Greg Breard, University of Rhode Island
-#               with Robert Tatoian, Vishakh Gopu, and Michael Eiger
+# version 5.0.0
+# (c) 2009-2020 University of Rhode Island
+#               Lutz Hamel, Benjamin Ott, Greg Breard,
+#               Robert Tatoian, Vishakh Gopu, Michael Eiger
 #
 # This file constitues a set of routines which are useful in constructing
 # and evaluating self-organizing maps (SOMs).
 # The main utilities available in this file are:
-# map.build --------- constructs a map
-# map.convergence --- reports the map convergence index
-# map.embed --------- reports the embedding of the map in terms of modeling the
-#                     underlying data distribution (100% if all feature distributions
-#                     are modeled correctly, 0% if none are)
-# map.embed.ks ------ reports the embedding of the map using the Kolmogorov-Smirnov Test
-# map.topo ---------- reports the estimated topographic accuracy
-# map.significance -- graphically reports the significance of each feature with
-#                     respect to the self-organizing map model
-# map.starburst ----- displays the starburst representation of the SOM model, the centers of
-#                     starbursts are the centers of clusters
-# map.projection ---- print a table with the associations of labels with map elements
-# map.neuron -------- returns the contents of a neuron at (x,y) on the map as a vector
-# map.marginal ------ displays a density plot of a training dataframe dimension overlayed
-#                      with the neuron density for that same dimension or index.
+# map ----------- constructs a map
+# starburst ----- displays the starburst representation of the SOM model,
+#                 the centers of starbursts are the centers of clusters
+# fitted -------- returns a vector of labels assigned to the observations
+# predict ------- returns classification labels for points in DF
+# position ------ return the position of points on the map
+# significance -- graphically reports the significance of each feature with
+#                 respect to the self-organizing map model
+# marginal ------ displays a density plot of a training dataframe dimension overlayed
+#                 with the neuron density for that same dimension or index.
 #
 ### License
 # This program is free software; you can redistribute it and/or modify it under
@@ -34,134 +30,433 @@
 #  A copy of the GNU General Public License is available at
 #  http://www.r-project.org/Licenses/
 #
+### Helpful docs
+# https://medium.com/@ODSC/unsupervised-learning-evaluating-clusters-bd47eed175ce
+# https://en.wikipedia.org/wiki/Total_sum_of_squares
 ###
 
 # load libraries
-require(som)
-require(class)
 require(fields)
 require(graphics)
 require(ggplot2)
+require(hash)
 
-### map.build -- construct a SOM, returns an object of class 'map'
+# S3 interface
+starburst <- function (map) UseMethod("starburst",map)
+fitted <- function (map) UseMethod("fitted",map)
+predict <- function (map,points) UseMethod("predict",map)
+position <- function (map,points) UseMethod("position",map)
+significance <- function (map,graphics, feature.labels) UseMethod("significance",map)
+marginal <- function (map,marginal) UseMethod("marginal",map)
+
+### constructor ###
+
+# map -- construct a SOM, returns an object of class 'map'
+#
 # parameters:
 # - data - a dataframe where each row contains an unlabeled training instance
 # - labels - a vector or dataframe with one label for each observation in data
 # - xdim,ydim - the dimensions of the map
 # - alpha - the learning rate, should be a positive non-zero real number
 # - train - number of training iterations
-# - algorithm - selection switch
-# retuns:
+# - normalize - normalize the input data by row
+# - seed - a seed value for repeatablity of random initialization and selection
+# value:
 # - an object of type 'map' -- see below
-
-# Hint: if your training data does not have any labels you can construct a
-#       simple label dataframe as follows: labels <- data.frame(1:nrow(training.data))
-
-# NOTE: default algorithm: "vsom" also available: "som", "experimental", "batchsom"
-
-map.build <- function(data,labels=NULL,xdim=10,ydim=5,alpha=.3,train=1000,algorithm="vsom")
+map <- function(data,
+                labels=NULL,
+                xdim=10,
+                ydim=5,
+                alpha=.3,
+                train=1000,
+                normalize=TRUE,
+                seed=NULL)
 {
-  
-  # pmatch: som == 1, vsom == 2, experimental == 3, batchsom == 4
-  algorithms = c("som","vsom","experimental","batchsom")
-  
-  # check if the dims are reasonable
-  if (xdim < 3 || ydim < 3)
-    stop("map.build: map is too small.")
-  
-  # train the map - returns a list of neurons
-  if (pmatch(algorithm,algorithms,nomatch=0) == 1) # som
-  {
-    # compute the initial neighborhood radius
-    r <- sqrt(xdim^2 + ydim^2)
-    
-    m <- som(data,
-             xdim=xdim,
-             ydim=ydim,
-             init="random",
-             alpha=c(alpha,alpha),
-             alphaType="linear",
-             neigh="bubble",
-             topol="rect",
-             radius=c(r,r),
-             rlen=c(1,train))
-    
-    # the 'som' package does something really annoying with attributes
-    # for the neuron matrix, we get rid of that by casting the neurons
-    # as a new matrix
-    neurons <- matrix(m$code,xdim*ydim,ncol(data))
-  }
-  else if (pmatch(algorithm,algorithms,nomatch=0) == 2) # vsom
-  {
-    neurons <- vsom.f(data,
-                      xdim=xdim,
-                      ydim=ydim,
-                      alpha=alpha,
-                      train=train)
-  }
-  else if (pmatch(algorithm,algorithms,nomatch=0) == 3) # experimental
-  {
-    neurons <- vsom.r(data,
-                      xdim=xdim,
-                      ydim=ydim,
-                      alpha=alpha,
-                      train=train)
-  }
-  else if (pmatch(algorithm,algorithms,nomatch=0) == 4) # batchsom
-  {
-    # compute the initial neighborhood radius
-    r <- sqrt(xdim^2 + ydim^2)
-    
-    m <- batchsom.private(data.matrix(data),
-                          grid=somgrid(xdim,ydim,"rectangular"),
-                          min.radius=1,
-                          max.radius=r,
-                          train=train,
-                          "random",
-                          "bubble")
-    
-    # extract the neurons
-    neurons <- matrix(m$codes,xdim*ydim,ncol(data))
-  }
-  else
-  {
-    stop("map.build only supports 'som','vsom','experimental',and 'batchsom'")
-  }
-  
+  if (xdim < 5 || ydim < 5)
+		stop("map: map is too small.")
+
+  if (!is.data.frame(data))
+    stop("map: training data has to be a data frame")
+
+  if (!all(sapply(data,is.numeric)))
+    stop("map: only numeric data can be used for training")
+
+  if (!is.null(labels) && !is.data.frame(labels))
+    labels <- data.frame(labels)
+
+  if (normalize)
+    data <- map.normalize(data)
+
+  if (!is.null(seed) && seed <= 0)
+      stop("map: seed value has to be a positive integer value")
+
+  if (!is.null(seed) && !test.integer(seed))
+      stop("map: seed value has to be a positive integer value")
+
+  if (!test.integer(train))
+      stop("map: train value has to be a positive integer value")
+
+  # train the neural network
+  neurons <- vsom.f(data,
+                    xdim=xdim,
+                    ydim=ydim,
+                    alpha=alpha,
+                    train=train,
+                    seed=seed)
+
   # make the neuron data a data frame
   neurons <- data.frame(neurons)
   names(neurons) <- names(data)
-  
-  ### construct the map object
+
+  # construct the map object
   map <- list(data=data,
               labels=labels,
               xdim=xdim,
               ydim=ydim,
               alpha=alpha,
               train=train,
-              algorithm=algorithm,
+              normalize=normalize,
               neurons=neurons)
-  
-  ### add the visual field to map
-  # for each observation i, visual has an entry for
-  # the best matching neuron
-  
-  visual <- c()
-  for (i in 1:nrow(data))
-  {
-    b <- best.match(map,data[i,])
-    visual <- c(visual,b)
-  }
-  
-  map$visual <- visual
-  
-  ### add the class name
+
+  # add the class name
   class(map) <- "map"
-  
+
+  # NOTE: do not change the order of the following computations
+
+  # add the heat map
+  map$heat <- compute.heat(map)
+
+  # list of indexes of the best matching neuron for each observation.
+  # each index is an row index into the 'neuron' data frame.
+  map$fitted.obs <- map.fitted.obs(map)
+
+  # map of centroids - this is a map where each cell points
+  # to the the location on the map where the corresponding centroid
+  # is located.  centroids point to themselves.
+  map$centroids <- compute.centroids(map)
+
+  # a list of actual centroid locations on the map
+  map$unique.centroids <- get.unique.centroids(map)
+
+  # this is a map where locations of centroids have a label associated
+  # with them. if unlabeled data then we invented labels for the centroids
+  map$centroid.labels <- majority.labels(map)
+
+  # label-to-centroid lookup table
+  # Note: a label can be associated with multiple centroids
+  map$label.to.centroid <- compute.label.to.centroid(map)
+
+  # a vector of lists of observations per centroid indexed
+  # by the centroid number from unique.centroids
+  map$centroid.obs <- compute.centroid.obs(map)
+
+  ### quality measures of the model ###
+
+  # the convergence index of a map
+  map$convergence <- map.convergence(map)
+
+  # compute the average within cluster sum of squares (wcss)
+  # this is the average distance variance within the clusters of the
+  # underlying cluster model
+  map$wcss <- compute.wcss(map)
+
+  # compute the between cluster sum of squares (bcss)
+  # this is the distance variance between the cluster centroids of the
+  # underlying cluster model
+  map$bcss <- compute.bcss(map)
+
   return(map)
 }
 
-### map.convergence - the convergence index of a map
+### implementation of S3 interface ###
+
+# starburst.map - compute and display the starburst representation of clusters
+# parameters:
+# - map is an object if type 'map'
+starburst.map <- function(map)
+{
+	if (class(map) != "map")
+		stop("starburst.map: first argument is not a map object.")
+
+	plot.heat(map)
+}
+
+# significance.map - compute the relative significance of each feature and plot it
+# parameters:
+# - map is an object if type 'map'
+# - graphics is a switch that controls whether a plot is generated or not
+# - feature.labels is a switch to allow the plotting of feature names vs feature indices
+# return value:
+# - a vector containing the significance for each feature
+significance.map <- function(map,graphics=TRUE,feature.labels=TRUE)
+{
+	if (class(map) != "map")
+		stop("significance.map: first argument is not a map object.")
+
+	data.df <- data.frame(map$data)
+	nfeatures <- ncol(data.df)
+
+	# Compute the variance of each feature on the map
+	var.v <- array(data=1,dim=nfeatures)
+	for (i in 1:nfeatures)
+  {
+		var.v[i] <- var(data.df[[i]]);
+	}
+
+	# we use the variance of a feature as likelihood of
+	# being an important feature, compute the Bayesian
+	# probability of significance using uniform priors
+
+	var.sum <- sum(var.v)
+	prob.v <- var.v/var.sum
+
+	# plot the significance
+	if (graphics)
+  {
+		par.v <- map.graphics.set()
+
+		y <- max(prob.v)
+		plot.new()
+		plot.window(xlim=c(1,nfeatures),ylim=c(0,y))
+		box()
+
+		title(xlab="Features",ylab="Significance")
+
+		xticks <- seq(1,nfeatures,1)
+		yticks <- seq(0,y,y/4)
+		if (feature.labels)
+			xlabels <- names(data.df)
+		else
+			xlabels <- seq(1,nfeatures,1)
+		ylabels <- formatC(seq(0,y,y/4),digits=2)
+		axis(1,at=xticks,labels=xlabels)
+		axis(2,at=yticks,labels=ylabels)
+
+		points(1:nfeatures,prob.v,type="h")
+
+		map.graphics.reset(par.v)
+	}
+  else
+  {
+		prob.v
+	}
+}
+
+# marginal.map - plot that shows the marginal probability distribution of the neurons and data
+# parameters:
+# - map is an object of type 'map'
+# - marginal is the name of a training data frame dimension or index
+marginal.map <- function(map,marginal)
+{
+  # ensure that map is a 'map' object
+  if (class(map) != "map")
+    stop("marginal: first argument is not a map object.")
+
+  # check if the second argument is of type character
+  if (!typeof(marginal) == "character")
+  {
+    train <- data.frame(points = map$data[[marginal]])
+    neurons <- data.frame(points = map$neurons[[marginal]])
+
+    train$legend <- 'training data'
+    neurons$legend <- 'neurons'
+
+    hist <- rbind(train,neurons)
+    ggplot(hist, aes(points, fill = legend)) + geom_density(alpha = 0.2) + xlab(names(map$data)[marginal])
+  }
+  else if (marginal %in% names(map$data))
+  {
+    train <- data.frame(points = map$data[names(map$data) == marginal])
+    colnames(train) <- c("points")
+
+    neurons <- data.frame(points = map$neurons[names(map$neurons) == marginal])
+    colnames(neurons) <- c("points")
+
+    train$legend <- 'training data'
+    neurons$legend <- 'neurons'
+
+    hist <- rbind(train,neurons)
+    ggplot(hist, aes(points, fill = legend)) + geom_density(alpha = 0.2) + xlab(marginal)
+  }
+  else
+  {
+    stop("marginal.map: second argument is not the name of a training data dimension or index")
+  }
+}
+
+# fitted.map -- returns a vector of labels assigned to the observations
+# parameters:
+# - map is an object of type 'map'
+# value:
+# - a vector of labels
+fitted.map <- function(map)
+{
+  if (class(map) != "map")
+    stop("fitted.map: first argument is not a map object.")
+
+  nobs <- length(map$fitted.obs)
+  labels <- c()
+  for (i in 1:nobs)
+  {
+    nix <- map$fitted.obs[[i]]
+    coord <- coordinate(map,nix)
+    x <- coord$x
+    y <- coord$y
+    c.x <- map$centroids[[x,y]]$x
+    c.y <- map$centroids[[x,y]]$y
+    l <- map$centroid.labels[[c.x,c.y]]
+    labels <- c(labels,l)
+  }
+  labels
+}
+
+# predict.map -- returns classification labels for points in DF
+# parameters:
+# - map -- map object
+# - points  -- data frame of points to be classified
+# value:
+# - the label of the centroid x belongs to
+predict.map <- function (map,points)
+{
+  # local function to do the actual prediction
+  predict.point <- function (x)
+  {
+    if (!is.vector(x))
+      stop("predict.map: argument has to be a vector.")
+
+    if (length(x) != ncol(map$data))
+      stop("predict.map: vector dimensionality is incompatible")
+
+    if (map$normalize)
+      x <- as.vector(map.normalize(x))
+
+    # find best matching neuron
+    nix <- best.match(map,x)
+
+    # find corresponding centroid
+    coord <- coordinate(map,nix)
+    ix <- coord$x
+    iy <- coord$y
+    c.xy <- map$centroids[[ix,iy]]
+    c.nix <- rowix(map,c.xy)
+    label <- map$centroid.labels[[c.xy$x,c.xy$y]]
+    c.ix <- find.centroidix(map,c.xy)
+
+    # compute the confidence of the prediction
+    # compute x to centroid distance
+    vectors <- rbind(map$neurons[c.nix,],x)
+    x.to.c.distance <- max(as.matrix(dist(vectors))[1,])
+
+    # compute the max radius of cluster
+    # NOTE: we are using the training data here NOT the neurons
+    vectors <- map$neurons[c.nix,]
+    for (i in 1:length(map$centroid.obs[[c.ix]]))
+    {
+      obs.ix <- map$centroid.obs[[c.ix]][i]
+      vectors <- rbind(vectors,map$data[obs.ix,])
+    }
+    max.o.to.c.distance <- max(as.matrix(dist(vectors))[1,])
+    # add a little bit of slack so we don't wind up with a 0 confidence value
+    max.o.to.c.distance <- max.o.to.c.distance + 0.05*max.o.to.c.distance
+
+    # compute confidence value
+    conf <- 1.0 - (x.to.c.distance/max.o.to.c.distance)
+    return (c(label,conf))
+  }
+
+  if (is.vector(points))
+    points <- t(data.frame(points))
+
+  m <- data.frame(t(apply(points,1,predict.point)))
+  names(m) <- c("Label", "Confidence")
+  m
+}
+
+# position.map -- return the position of points on the map
+# parameters:
+# - map -- map object
+# - points   -- a data frame of points to be mapped
+# value:
+# - x-y coordinates of points in points
+position.map <- function (map,points)
+{
+  # local function to positon a point on the map
+  position.point <- function(x)
+  {
+    if (!is.vector(x))
+      stop("position.map: argument has to be a vector.")
+
+    if (length(x) != ncol(map$data))
+      stop("position.map: vector dimensionality is incompatible")
+
+    if (map$normalize)
+      x <- as.vector(map.normalize(x))
+
+    nix <- best.match(map,x)
+    coord <- coordinate(map,nix)
+    return (c(coord$x,coord$y))
+  }
+
+  if (is.vector(points))
+    points <- t(data.frame(points))
+
+  m <- data.frame(t(apply(points,1,position.point)))
+  names(m) <- c("x-dim", "y-dim")
+  m
+}
+
+#############################################################################
+############################# local functions ###############################
+#############################################################################
+
+# test.integer -- test to see if x is an integer value
+test.integer <- function(x)
+{
+  all.equal(x, as.integer(x), check.attributes = FALSE)
+}
+
+# find.centroidix -- given a coordinate find the ix into the
+#                    unique.centroids table
+find.centroidix <- function (map,cd)
+{
+  for (i in 1:length(map$unique.centroids))
+  {
+    if (cd$x == map$unique.centroids[[i]]$x &&
+        cd$y == map$unique.centroids[[i]]$y)
+      {
+        return (i)
+      }
+  }
+  stop("find.centroidix: coordinate not a centroid")
+}
+
+# compute.centroid.obs -- compute the observations that belong to each
+#                         centroid.
+compute.centroid.obs <- function (map)
+{
+  centroid.obs <- array(list(),dim=length(map$unique.centroids))
+
+  for (cluster.ix in 1:length(map$unique.centroids))
+  {
+    c.nix <- rowix(map,map$unique.centroids[[cluster.ix]])
+    for (i in 1:nrow(map$data))
+    {
+      # find the centroid of the current observation's
+      # best matching neuron
+      coord <- coordinate(map,map$fitted.obs[i])
+      # centroid of cluster the neuron belongs to
+      c.obj.nix <- rowix(map,map$centroids[[coord$x,coord$y]])
+      # if observation centroid equal current centroid add to vectors
+      if (c.obj.nix == c.nix)
+      {
+        centroid.obs[[cluster.ix]] <- append(centroid.obs[[cluster.ix]],i)
+      }
+    }
+  }
+  as.vector(centroid.obs)
+}
+
+# map.convergence - the convergence index of a map
 #
 # parameters:
 # - map is an object if type 'map'
@@ -172,50 +467,127 @@ map.build <- function(data,labels=NULL,xdim=10,ydim=5,alpha=.3,train=1000,algori
 # - ks is a switch, true for ks-test, false for standard var and means test
 #
 # - return value is the convergence index
-
 map.convergence <- function(map,conf.int=.95,k=50,verb=FALSE,ks = TRUE)
 {
-  if (ks)
-    embed <- map.embed.ks(map,conf.int,verb=FALSE)
-  else
-    embed <- map.embed.vm(map,conf.int,verb=FALSE)
-  
-  topo <- map.topo.private(map,k,conf.int,verb=FALSE,interval=FALSE)
-  
-  if (verb)
-    return (list(embed=embed,topo=topo))
-  else
-    return (0.5*embed + 0.5*topo)
+    if (ks)
+      embed <- map.embed.ks(map,conf.int,verb=FALSE)
+    else
+      embed <- map.embed.vm(map,conf.int,verb=FALSE)
+
+    topo <- map.topo(map,k,conf.int,verb=FALSE,interval=FALSE)
+
+    if (verb)
+        return (list(embed=embed,topo=topo))
+    else
+        return (0.5*embed + 0.5*topo)
 }
 
-### map.embed - evaluate the embedding of a map using the F-test and
-#                     a Bayesian estimate of the variance in the training data.
-# parameters:
-# - map is an object if type 'map'
-# - conf.int is the confidence interval of the convergence test (default 95%)
-# - verb is switch that governs the return value false: single convergence value
-#   is returned, true: a vector of individual feature congences is returned.
-#
-# - return value is the cembedding of the map (variance captured by the map so far)
-
-# Hint: the embedding index is the variance of the training data captured by the map;
-#       maps with convergence of less than 90% are typically not trustworthy.  Of course,
-#       the precise cut-off depends on the noise level in your training data.
-map.embed <- function(map,conf.int=.95,verb=FALSE,ks=FALSE)
+# compute.wcss -- compute the average within cluster sum of squares
+# see here:
+# https://medium.com/@ODSC/unsupervised-learning-evaluating-clusters-bd47eed175ce
+compute.wcss <- function (map)
 {
-  
-  .Deprecated(new = 'map.convergence', package = 'popsom',
-              msg = '"map.embed" is being deprecated and has been flagged for removal in the next release of the popsom package.
-Please consider using "map.convergence" with the argument verb = True to explicitly determine the embedding
-accuracy of the map.')
-  
-  if (ks)
-    map.embed.ks(map,conf.int,verb)
-  else
-    map.embed.vm(map,conf.int,verb)
+  # for each cluster gather all the point vectors that belong to that
+  # cluster into table 'vectors' making sure that the centroid vector
+  # is always the first vector in the table.  Then compute the
+  # sum square distances from the centroid to all the points.
+  # when computing the average make sure that we ignore the centroid vector.
+  clusters.ss <- c()
+  for (cluster.ix in 1:length(map$unique.centroids))
+  {
+    c.nix <- rowix(map,map$unique.centroids[[cluster.ix]])
+    vectors <- map$neurons[c.nix,]
+    for (i in 1:length(map$centroid.obs[[cluster.ix]]))
+    {
+      obs.ix <- map$centroid.obs[[cluster.ix]][i]
+      vectors <- rbind(vectors,map$data[obs.ix,])
+    }
+    distances <- as.matrix(dist(vectors))[1,]
+    distances.sqd <- sapply(distances,function(x){x*x})
+    c.ss <- sum(distances.sqd)/(length(distances.sqd)-1)
+    clusters.ss <- c(clusters.ss,c.ss)
+  }
+  wcss <- sum(clusters.ss)/length(clusters.ss)
+  wcss
 }
 
-### map.topo - measure the topographic accuracy of the map using sampling
+# compute.bcss -- compute the average between cluster sum of squares
+# see here:
+# https://medium.com/@ODSC/unsupervised-learning-evaluating-clusters-bd47eed175ce
+compute.bcss <- function (map)
+{
+  all.bc.ss <- c()
+
+  # put all cluster vectors into one table
+  c.nix <- rowix(map,map$unique.centroids[[1]])
+  cluster.vectors <- map$neurons[c.nix,]
+  for (cluster.ix in 2:length(map$unique.centroids))
+  {
+    c.nix <- rowix(map,map$unique.centroids[[cluster.ix]])
+    c.vector <- map$neurons[c.nix,]
+    cluster.vectors <- rbind(cluster.vectors,c.vector)
+  }
+
+  # put each cluster vector at the beginning of the table in turn
+  # and compute the distances - row 1 will have our results
+  # NOTE: at every iteration one of the cluster vectors will
+  # appear twice in the vector table. we have to adjust for that
+  # when computing the average.
+  for (cluster.ix in 1:length(map$unique.centroids))
+  {
+    c.nix <- rowix(map,map$unique.centroids[[cluster.ix]])
+    c.vector <- map$neurons[c.nix,]
+    compute.vectors <- rbind(c.vector,cluster.vectors)
+    bc.distances <- as.matrix(dist(compute.vectors))[1,]
+    bc.distances.sqd <- sapply(bc.distances,function(x){x*x})
+    bc.ss <- sum(bc.distances.sqd)/(length(bc.distances.sqd)-2) # cluster.ix appears twice
+    all.bc.ss <- c(all.bc.ss,bc.ss)
+  }
+
+  # basic sanity check
+  stopifnot(length(all.bc.ss)==length(map$unique.centroids))
+  bcss <- sum(all.bc.ss)/length(all.bc.ss)
+  bcss
+}
+
+# compute.label.to.centroid -- compute a label to centroid lookup table
+# The returned value is a table of indexes into the unique centroids table
+compute.label.to.centroid <- function (map)
+{
+  conv <- hash()
+
+  for (i in 1:length(map$unique.centroids))
+  {
+    x <- map$unique.centroids[[i]]$x
+    y <- map$unique.centroids[[i]]$y
+    l <- map$centroid.labels[[x,y]]
+    if (is.null(conv[[l]]))
+    {
+      conv[[l]] <- list(i)
+    }
+    else
+    {
+      conv[[l]] <- append(conv[[l]],i)
+    }
+  }
+  conv
+}
+
+# for each observation i, visual has an entry for
+# the best matching neuron
+map.fitted.obs <- function(map)
+{
+  fitted.obs <- c()
+  for (i in 1:nrow(map$data))
+  {
+      b <- best.match(map,map$data[i,])
+      fitted.obs <- c(fitted.obs,b)
+  }
+
+  fitted.obs
+}
+
+# map.topo - measure the topographic accuracy of the map using sampling
 #
 # parameters:
 # - map is an object if type 'map'
@@ -228,387 +600,189 @@ accuracy of the map.')
 # - return value is the estimated topographic accuracy
 map.topo <- function(map,k=50,conf.int=.95,verb=FALSE,interval=TRUE)
 {
-  .Deprecated(new = 'map.convergence', package = 'popsom',
-              msg = '"map.topo" is being deprecated and has been flagged for removal in the next release of the popsom package.
-Please consider using "map.convergence" with the argument verb = True to explicitly determine the estimated topographic
-accuracy of the map.')
-  
-  map.topo.private(map,k,conf.int,verb,interval)
-}
-
-### map.starburst - compute and display the starburst representation of clusters
-# parameters:
-# - map is an object if type 'map'
-# - explicit controls the shape of the connected components
-# - smoothing controls the smoothing level of the umat (NULL,0,>0)
-# - merge.clusters is a switch that controls if the starburst clusters are merged together
-# - merge.range - a range that is used as a percentage of a certain distance in the code
-#                 to determine whether components are closer to their centroids or
-#                 centroids closer to each other.
-
-map.starburst <- function(map,explicit=FALSE,smoothing=2,merge.clusters=FALSE,merge.range=.25)
-{
-  
   if (class(map) != "map")
-    stop("map.starburst: first argument is not a map object.")
-  
-  umat <- compute.umat(map,smoothing=smoothing)
-  plot.heat(map,umat,explicit=explicit,comp=TRUE,merge=merge.clusters,merge.range=merge.range)
-}
+      stop("map.topo: first argument is not a map object.")
 
-
-### map.projection - print the association of labels with map elements
-# parameters:
-# - map is an object if type 'map'
-# return values:
-# - a dataframe containing the projection onto the map for each observation
-
-map.projection <- function(map)
-{
-  
-  .Deprecated(package = 'popsom', msg = '"map.projection" is being deprecated and has been flagged for removal in the next release of the popsom package.')
-  
-  if (class(map) != "map")
-    stop("map.projection: first argument is not a map object.")
-  
-  if (is.null(map$labels))
-    stop("map.projection: no labels available")
-  
-  labels.v <- map$labels
-  x.v <- c()
-  y.v <- c()
-  
-  for (i in 1:nrow(labels.v))
-  {
-    ix <- map$visual[i]
-    coord <- coordinate(map,ix)
-    x.v <- c(x.v,coord[1])
-    y.v <- c(y.v,coord[2])
-  }
-  
-  x.v <- data.frame(x.v)
-  y.v <- data.frame(y.v)
-  
-  names(labels.v) <- "labels"
-  names(x.v) <- "x"
-  names(y.v) <- "y"
-  
-  data.frame(labels.v,x.v,y.v)
-}
-
-### map.significance - compute the relative significance of each feature and plot it
-# parameters:
-# - map is an object if type 'map'
-# - graphics is a switch that controls whether a plot is generated or not
-# - feature.labels is a switch to allow the plotting of feature names vs feature indices
-# return value:
-# - a vector containing the significance for each feature
-
-map.significance <- function(map,graphics=TRUE,feature.labels=TRUE)
-{
-  if (class(map) != "map")
-    stop("map.significance: first argument is not a map object.")
-  
-  data.df <- data.frame(map$data)
-  nfeatures <- ncol(data.df)
-  
-  # Compute the variance of each feature on the map
-  var.v <- array(data=1,dim=nfeatures)
-  for (i in 1:nfeatures)
-  {
-    var.v[i] <- var(data.df[[i]]);
-  }
-  
-  # we use the variance of a feature as likelihood of
-  # being an important feature, compute the Bayesian
-  # probability of significance using uniform priors
-  
-  var.sum <- sum(var.v)
-  prob.v <- var.v/var.sum
-  
-  # plot the significance
-  if (graphics)
-  {
-    par.v <- map.graphics.set()
-    
-    y <- max(prob.v)
-    plot.new()
-    plot.window(xlim=c(1,nfeatures),ylim=c(0,y))
-    box()
-    
-    title(xlab="Features",ylab="Significance")
-    
-    xticks <- seq(1,nfeatures,1)
-    yticks <- seq(0,y,y/4)
-    if (feature.labels)
-      xlabels <- names(data.df)
-    else
-      xlabels <- seq(1,nfeatures,1)
-    ylabels <- formatC(seq(0,y,y/4),digits=2)
-    axis(1,at=xticks,labels=xlabels)
-    axis(2,at=yticks,labels=ylabels)
-    
-    points(1:nfeatures,prob.v,type="h")
-    
-    map.graphics.reset(par.v)
-    
-  }
-  else
-  {
-    prob.v
-  }
-}
-
-
-### map.neuron - returns the contents of a neuron at (x,y) on the map as a vector
-# parameters:
-#   map - the neuron map
-#   x - map x-coordinate of neuron
-#   y - map y-coordinate of neuron
-# return value:
-#   a vector representing the neuron
-
-map.neuron <- function(map,x,y)
-{
-  if (class(map) != "map")
-    stop("map.neuron: first argument is not a map object.")
-  
-  ix <- rowix(map,x,y)
-  map$neurons[ix,]
-}
-
-
-### map.marginal - plot that shows the marginal probability distribution of the neurons and data
-# parameters:
-# - map is an object of type 'map'
-# - marginal is the name of a training data frame dimension or index
-
-map.marginal <- function(map,marginal)
-{
-  # ensure that map is a 'map' object
-  if (class(map) != "map")
-    stop("map.marginal: first argument is not a map object.")
-  
-  # check if the second argument is of type character
-  if (!typeof(marginal) == "character")
-  {
-    train <- data.frame(points = map$data[[marginal]])
-    neurons <- data.frame(points = map$neurons[[marginal]])
-    
-    train$legend <- 'training data'
-    neurons$legend <- 'neurons'
-    
-    hist <- rbind(train,neurons)
-    ggplot(hist, aes(points, fill = legend)) + geom_density(alpha = 0.2) + xlab(names(map$data)[marginal])
-    
-  }
-  else if (marginal %in% names(map$data))
-  {
-    
-    train <- data.frame(points = map$data[names(map$data) == marginal])
-    colnames(train) <- c("points")
-    
-    neurons <- data.frame(points = map$neurons[names(map$neurons) == marginal])
-    colnames(neurons) <- c("points")
-    
-    train$legend <- 'training data'
-    neurons$legend <- 'neurons'
-    
-    hist <- rbind(train,neurons)
-    ggplot(hist, aes(points, fill = legend)) + geom_density(alpha = 0.2) + xlab(marginal)
-    
-  }
-  else
-  {
-    stop("map.marginal: second argument is not the name of a training data frame dimension or index")
-  }
-  
-}
-
-############################### local functions #################################
-
-map.topo.private <- function(map,k=50,conf.int=.95,verb=FALSE,interval=TRUE)
-{
-  
-  
-  if (class(map) != "map")
-    stop("map.topo: first argument is not a map object.")
-  
   # data.df is a matrix that contains the training data
   data.df <- as.matrix(map$data)
-  
+
   # sample map$data
   # TODO: think of something clever here rather than just aborting.
   if (k > nrow(data.df))
-    stop("map.topo: sample larger than training data.")
-  
+      stop("map.topo: sample larger than training data.")
+
   data.sample.ix <- sample(1:nrow(data.df),size=k,replace=FALSE)
-  
+
   # compute the sum topographic accuracy - the accuracy of a single sample
   # is 1 if the best matching unit is a neighbor otherwise it is 0
   acc.v <- c()
   for (i in 1:k)
   {
-    acc.v <- c(acc.v,accuracy(map,data.df[data.sample.ix[i],],data.sample.ix[i]))
+      acc.v <- c(acc.v,accuracy(map,data.df[data.sample.ix[i],],data.sample.ix[i]))
   }
-  
+
   # compute the confidence interval values using the bootstrap
   if (interval)
-    bval <- bootstrap(map,conf.int,data.df,k,acc.v)
-  
+      bval <- bootstrap(map,conf.int,data.df,k,acc.v)
+
   # the sum topographic accuracy is scaled by the number of samples - estimated
   # topographic accuracy
   if (verb)
   {
-    acc.v
+      acc.v
   }
   else
   {
-    val <- sum(acc.v)/k
-    if (interval)
-      list(val=val,lo=bval$lo,hi=bval$hi)
-    else
-      val
-    
+      val <- sum(acc.v)/k
+      if (interval)
+          list(val=val,lo=bval$lo,hi=bval$hi)
+      else
+          val
+
   }
 }
 
 # map.embed using variance and mean tests
-
 map.embed.vm <- function(map,conf.int=.95,verb=FALSE)
 {
-  
-  if (class(map) != "map")
-    stop("map.embed: first argument is not a map object.")
-  
-  # map.df is a dataframe that contains the neurons
-  map.df <- data.frame(map$neurons)
-  
-  # data.df is a dataframe that contain the training data
-  # note: map$data is what the 'som' package returns
-  data.df <- data.frame(map$data)
-  
-  # do the F-test on a pair of datasets: code vectors/training data
-  vl <- df.var.test(map.df,data.df,conf=conf.int)
-  
-  # do the t-test on a pair of datasets: code vectors/training data
-  ml <- df.mean.test(map.df,data.df,conf=conf.int)
-  
-  # compute the variance captured by the map -- but only if the means have converged as well.
-  nfeatures <- ncol(map.df)
-  prob.v <- map.significance(map,graphics=FALSE)
-  var.sum <- 0
-  
-  for (i in 1:nfeatures)
-  {
-    #cat("Feature",i,"variance:\t",vl$ratio[i],"\t(",vl$conf.int.lo[i],"-",vl$conf.int.hi[i],")\n")
-    #cat("Feature",i,"mean:\t",ml$diff[i],"\t(",ml$conf.int.lo[i],"-",ml$conf.int.hi[i],")\n")
-    if (vl$conf.int.lo[i] <= 1.0 && vl$conf.int.hi[i] >= 1.0 &&  ml$conf.int.lo[i] <= 0.0 && ml$conf.int.hi[i] >= 0.0) {
-      var.sum <- var.sum + prob.v[i]
-    } else {
-      # not converged - zero out the probability
-      prob.v[i] <- 0
+
+    if (class(map) != "map")
+        stop("map.embed: first argument is not a map object.")
+
+    # map.df is a dataframe that contains the neurons
+    map.df <- data.frame(map$neurons)
+
+    # data.df is a dataframe that contain the training data
+    # note: map$data is what the 'som' package returns
+    data.df <- data.frame(map$data)
+
+    # do the F-test on a pair of datasets: code vectors/training data
+    vl <- df.var.test(map.df,data.df,conf=conf.int)
+
+    # do the t-test on a pair of datasets: code vectors/training data
+    ml <- df.mean.test(map.df,data.df,conf=conf.int)
+
+    # compute the variance captured by the map -- but only if the means have converged as well.
+    nfeatures <- ncol(map.df)
+    prob.v <- significance.map(map,graphics=FALSE)
+    var.sum <- 0
+
+    for (i in 1:nfeatures)
+    {
+        #cat("Feature",i,"variance:\t",vl$ratio[i],"\t(",vl$conf.int.lo[i],"-",vl$conf.int.hi[i],")\n")
+        #cat("Feature",i,"mean:\t",ml$diff[i],"\t(",ml$conf.int.lo[i],"-",ml$conf.int.hi[i],")\n")
+        if (vl$conf.int.lo[i] <= 1.0
+            && vl$conf.int.hi[i] >= 1.0
+            &&  ml$conf.int.lo[i] <= 0.0
+            && ml$conf.int.hi[i] >= 0.0)
+        {
+            var.sum <- var.sum + prob.v[i]
+        }
+        else
+        {
+            # not converged - zero out the probability
+            prob.v[i] <- 0
+        }
     }
-  }
-  
-  # return the variance captured by converged features
-  if (verb)
-    prob.v
-  else
-    var.sum
+
+    # return the variance captured by converged features
+    if (verb)
+      prob.v
+    else
+      var.sum
 }
 
 # map.embed using the kolgomorov-smirnov test
-
-map.embed.ks <- function(map,conf.int=.95,verb=FALSE) {
-  
-  if (class(map) != "map") {
-    stop("map.embed: first argument is not a map object.")
+map.embed.ks <- function(map,conf.int=.95,verb=FALSE)
+{
+  if (class(map) != "map")
+  {
+      stop("map.embed: first argument is not a map object.")
   }
-  
+
   # map.df is a dataframe that contains the neurons
   map.df <- data.frame(map$neurons)
-  
+
   # data.df is a dataframe that contain the training data
   # note: map$data is what the 'som' package returns
   data.df <- data.frame(map$data)
-  
+
   nfeatures <- ncol(map.df)
-  
+
   # use the Kolmogorov-Smirnov Test to test whether the neurons and training data appear
   # to come from the same distribution
   ks.vector <- NULL
   for(i in 1:nfeatures){
-    # Note rpt - I needed to use suppress warnings to suppress the warning about ties.
-    ks.vector[[i]] <- suppressWarnings(ks.test(map.df[[i]], data.df[[i]]))
+      # Note rpt - I needed to use suppress warnings to suppress the warning about ties.
+      ks.vector[[i]] <- suppressWarnings(ks.test(map.df[[i]], data.df[[i]]))
   }
-  
-  prob.v <- map.significance(map,graphics=FALSE)
+
+  prob.v <- significance.map(map,graphics=FALSE)
   var.sum <- 0
-  
+
   # compute the variance captured by the map
   for (i in 1:nfeatures)
   {
-    # the second entry contains the p-value
-    if (ks.vector[[i]][[2]] > (1 - conf.int)) {
-      var.sum <- var.sum + prob.v[i]
-    } else {
-      # not converged - zero out the probability
-      prob.v[i] <- 0
-    }
+      # the second entry contains the p-value
+      if (ks.vector[[i]][[2]] > (1 - conf.int)) {
+          var.sum <- var.sum + prob.v[i]
+      } else {
+          # not converged - zero out the probability
+          prob.v[i] <- 0
+      }
   }
-  
+
   # return the variance captured by converged features
   if (verb)
     prob.v
   else
     var.sum
-  
 }
 
 # map.normalize -- based on the som:normalize function but preserved names
-
-map.normalize <- function (x, byrow = TRUE)
+map.normalize <- function (x)
 {
-  if (is.data.frame(x))
+  if (is.vector(x))
   {
-    if (byrow)
-      df <- t(apply(x, 1, scale))
-    else
-      df <- apply(x, 2, scale)
+    return (scale(x))
+  }
+  else if (is.data.frame(x))
+  {
+    df <- data.frame(t(apply(x,1,scale)))
     names(df) <- names(x)
+    return (df)
   }
   else
-    stop("map.normalize: 'x' is not a dataframe.\n")
+  {
+    stop("map.normalize: 'x' is not a vector or dataframe.\n")
+  }
 }
 
 
 # bootstrap -- compute the topographic accuracies for the given confidence interval
-
 bootstrap <- function(map,conf.int,data.df,k,sample.acc.v)
 {
   ix <- as.integer(100 - conf.int*100)
   bn <- 200
-  
+
   bootstrap.acc.v <- c(sum(sample.acc.v)/k)
-  
+
   for (i in 2:bn)
   {
-    bs.v <- sample(1:k,size=k,replace=TRUE)
-    a <- sum(sample.acc.v[bs.v])/k
-    bootstrap.acc.v <- c(bootstrap.acc.v,a)
+      bs.v <- sample(1:k,size=k,replace=TRUE)
+      a <- sum(sample.acc.v[bs.v])/k
+      bootstrap.acc.v <- c(bootstrap.acc.v,a)
   }
-  
+
   bootstrap.acc.sort.v <- sort(bootstrap.acc.v)
-  
+
   lo.val <- bootstrap.acc.sort.v[ix]
   hi.val <- bootstrap.acc.sort.v[bn-ix]
-  
+
   list(lo=lo.val,hi=hi.val)
 }
 
 # best.match -- given observation obs, return the best matching neuron
-
 best.match <- function(map,obs,full=FALSE)
 {
   # NOTE: replicate obs so that there are nr rows of obs
@@ -618,7 +792,7 @@ best.match <- function(map,obs,full=FALSE)
   s <- rowSums(squ)
   d <- sqrt(s)
   o <- order(d)
-  
+
   if (full)
     o
   else
@@ -627,1337 +801,975 @@ best.match <- function(map,obs,full=FALSE)
 
 # accuracy -- the topographic accuracy of a single sample is 1 is the best matching unit
 #             and the second best matching unit are are neighbors otherwise it is 0
-
 accuracy <- function(map,sample,data.ix)
 {
-  # compute the euclidean distances of the sample from the neurons
-  # and find the 2 best matching units for the sample
-  
-  o <- best.match(map,sample,full=TRUE)
-  best.ix <- o[1]
-  second.best.ix <- o[2]
-  
-  # sanity check
-  coord <- coordinate(map,best.ix)
-  coord.x <- coord[1]
-  coord.y <- coord[2]
-  
-  map.ix <- map$visual[data.ix]
-  coord <- coordinate(map,map.ix)
-  map.x <- coord[1]
-  map.y <- coord[2]
-  
-  if (coord.x != map.x || coord.y != map.y || best.ix != map.ix){
-    cat("best.ix: ",best.ix," map.rix: ",map.ix,"\n")
-    stop("accuracy: problems with coordinates")
-  }
-  
-  # determine if the best and second best are neighbors on the map
-  best.xy <- coordinate(map,best.ix)
-  second.best.xy <- coordinate(map,second.best.ix)
-  diff.map <- best.xy - second.best.xy
-  diff.map.sq <- diff.map * diff.map
-  sum.map <- sum(diff.map.sq)
-  dist.map <- sqrt(sum.map)
-  
-  # it is a neighbor if the distance on the map
-  # between the bmu and 2bmu is less than 2
-  if (dist.map < 2)
-    1
-  else
-    0
+    # compute the euclidean distances of the sample from the neurons
+    # and find the 2 best matching units for the sample
+
+    o <- best.match(map,sample,full=TRUE)
+    best.ix <- o[1]
+    second.best.ix <- o[2]
+
+    # sanity check
+    coord <- coordinate(map,best.ix)
+    coord.x <- coord$x
+    coord.y <- coord$y
+
+    map.ix <- map$fitted.obs[data.ix]
+    coord <- coordinate(map,map.ix)
+    map.x <- coord$x
+    map.y <- coord$y
+
+    if (coord.x != map.x || coord.y != map.y || best.ix != map.ix)
+    {
+        cat("best.ix: ",best.ix," map.rix: ",map.ix,"\n")
+        stop("accuracy: problems with coordinates")
+    }
+
+    # determine if the best and second best are neighbors on the map
+    best.xy <- coordinate(map,best.ix)
+    second.best.xy <- coordinate(map,second.best.ix)
+    diff.map <- c(best.xy$x,best.xy$y) - c(second.best.xy$x,second.best.xy$y)
+    diff.map.sq <- diff.map * diff.map
+    sum.map <- sum(diff.map.sq)
+    dist.map <- sqrt(sum.map)
+
+    # it is a neighbor if the distance on the map
+    # between the bmu and 2bmu is less than 2
+    if (dist.map < 2)
+      1
+    else
+      0
+}
+
+# coord -- constructor for a 'coord' object
+coord <- function (x=-1,y=-1)
+{
+  l <- list(x=x,y=y)
+  class(l) <- "coord"
+  l
 }
 
 # coordinate -- convert from a row index to a map xy-coordinate
-
 coordinate <- function(map,rowix)
 {
-  x <- (rowix-1) %% map$xdim + 1
-  y <- (rowix-1) %/% map$xdim + 1
-  c(x,y)
+    x <- (rowix-1) %% map$xdim + 1
+    y <- (rowix-1) %/% map$xdim + 1
+    coord(x,y)
 }
 
-#rowix -- convert from a map xy-coordinate to a row index
-
-rowix <- function(map,x,y)
+# rowix -- convert from a map xy-coordinate to a row index
+rowix <- function(map,cd)
 {
-  rix <- x + (y-1)*map$xdim
-  rix
+    if (class(cd) != "coord")
+      stop("rowix: expected a coord object")
+
+    rix <- cd$x + (cd$y-1)*map$xdim
+    rix
 }
 
 # map.graphics.set -- set the graphics environment for our map utilities
 #                     the return value is the original graphics param vector
-
 map.graphics.set <- function()
 {
-  par.v <- par()
-  par(ps=6)
-  par.v
+	par.v <- par()
+	par(ps=6)
+	par.v
 }
 
 # map.graphics.reset -- reset the graphics environment to the original state
 # parameter - a vector containing the settings for the original state
-
 map.graphics.reset <- function(par.vector)
 {
-  par(ps=par.vector$ps)
+	par(ps=par.vector$ps)
 }
 
-### plot.heat - plot a heat map based on a 'map', this plot also contains the connected
-#               components of the map based on the landscape of the heat map
-# parameters:
-# - map is an object if type 'map'
-# - heat is a 2D heat map of the map returned by 'map'
-# - labels is a vector with labels of the original training data set
-# - explicit controls the shape of the connected components
-# - comp controls whether we plot the connected components on the heat map
-# - merge controls whether we merge the starbursts together.
-# - merge.range - a range that is used as a percentage of a certain distance in the code
-#                 to determine whether components are closer to their centroids or
-#                 centroids closer to each other.
-
-plot.heat <- function(map,heat,explicit=FALSE,comp=TRUE,merge=FALSE,merge.range)
+# plot.heat - plot a heat map based on a 'map', this plot also contains the connected
+#             components of the map based on the landscape of the heat map
+plot.heat <- function(map)
 {
-  ### keep an unaltered copy of the unified distance matrix,
-  ### required for merging the starburst clusters
-  umat <- heat
-  
-  x <- map$xdim
-  y <- map$ydim
-  nobs <- nrow(map$data)
-  count <- array(data=0,dim=c(x,y))
-  
-  ### need to make sure the map doesn't have a dimension of 1
-  if (x <= 1 || y <= 1)
+	x <- map$xdim
+	y <- map$ydim
+  centroids <- map$centroids
+
+	### need to make sure the map doesn't have a dimension of 1
+	if (x <= 1 || y <= 1)
   {
     stop("plot.heat: map dimensions too small")
   }
-  
+
   ### bin the heat values into 100 bins used for the 100 heat colors
-  heat.v <- as.vector(heat)
+  heat.v <- as.vector(map$heat)
   heat.v <- cut(heat.v,breaks=100,labels=FALSE)
   heat <- array(data=heat.v,dim=c(x,y))
   colors<- heat.colors(100)
-  
-  ### set up the graphics window
-  par.v <- map.graphics.set()
-  plot.new()
-  plot.window(xlim=c(0,x),ylim=c(0,y))
-  box()
-  
-  title(xlab="x",ylab="y")
-  
-  xticks <- seq(0.5,x-0.5,1)
-  yticks <- seq(0.5,y-0.5,1)
-  xlabels <- seq(1,x,1)
-  ylabels <- seq(1,y,1)
-  axis(1,at=xticks,labels=xlabels)
-  axis(3,at=xticks,labels=xlabels)
-  axis(2,at=yticks,labels=ylabels)
-  axis(4,at=yticks,labels=ylabels)
-  
-  
+
+	### set up the graphics window
+	par.v <- map.graphics.set()
+	plot.new()
+	plot.window(xlim=c(0,x),ylim=c(0,y))
+	box()
+
+	title(xlab="x",ylab="y")
+
+	xticks <- seq(0.5,x-0.5,1)
+	yticks <- seq(0.5,y-0.5,1)
+	xlabels <- seq(1,x,1)
+	ylabels <- seq(1,y,1)
+	axis(1,at=xticks,labels=xlabels)
+	axis(3,at=xticks,labels=xlabels)
+	axis(2,at=yticks,labels=ylabels)
+	axis(4,at=yticks,labels=ylabels)
+
   ### plot the neurons as heat squares on the map
   # TODO: vectorize this - rect can operate on vectors of coordinates and values
-  for (ix in 1:x)
+	for (ix in 1:x)
+  {
+		for (iy in 1:y)
+    {
+			rect(ix-1,iy-1,ix,iy,col=colors[100 - heat[ix,iy] + 1],border=NA)
+		}
+	}
+
+  # connect each neuron to its centroid
+	for(ix in 1:x)
+  {
+		for (iy in 1:y)
+    {
+			cx <- centroids[[ix,iy]]$x
+			cy <- centroids[[ix,iy]]$y
+			points(c(ix,cx)-.5,c(iy,cy)-.5,type="l",col="grey")
+		}
+	}
+
+  # put majority labels on the centroids
+  # Note: if labels were not given then the function majority.labels
+  # will compute numerical labels to attach to the centroids.
+  centroid.labels <- majority.labels(map)
+
+  for(ix in 1:x)
   {
     for (iy in 1:y)
     {
-      rect(ix-1,iy-1,ix,iy,col=colors[100 - heat[ix,iy] + 1],border=NA)
-    }
-  }
-  
-  ### put the connected component lines on the map
-  if (comp)
-  {
-    if(!merge){
-      # find the centroid for each neuron on the map
-      centroids <- compute.centroids(map,heat,explicit)
-    } else {
-      # find the unique centroids for the neurons on the map
-      centroids <- compute.combined.clusters(map,umat,explicit,merge.range)
-    }
-    # connect each neuron to its centroid
-    for(ix in 1:x)
-    {
-      for (iy in 1:y)
+      lab <- centroid.labels[[ix,iy]]
+      if (lab != none.label)
       {
-        cx <- centroids$centroid.x[ix,iy]
-        cy <- centroids$centroid.y[ix,iy]
-        points(c(ix,cx)-.5,c(iy,cy)-.5,type="l",col="grey")
+        text(ix-.5,iy-.5,labels=lab)
       }
     }
   }
-  
-  ### put the labels on the map if available
-  if (!is.null(map$labels))
-  {
-    # count the labels in each map cell
-    for(i in 1:nobs)
-    {
-      nix <- map$visual[i]
-      c <- coordinate(map,nix)
-      ix <- c[1]
-      iy <- c[2]
-      
-      count[ix,iy] <- count[ix,iy]+1
-    }
-    
-    #count.df <- data.frame(count)
-    #print(count.df)
-    
-    for(i in 1:nobs)
-    {
-      c <- coordinate(map,map$visual[i])
-      #cat("Coordinate of ",i," is ",c,"\n")
-      ix <- c[1]
-      iy <- c[2]
-      # we only print one label per cell
-      # TODO: print out majority label
-      if (count[ix,iy] > 0)
-      {
-        count[ix,iy] <- 0
-        ix <- ix - .5
-        iy <- iy - .5
-        l <- map$labels[i,1]
-        text(ix,iy,labels=l)
-      }
-    }
-  }
-  
-  map.graphics.reset(par.v)
+
+	map.graphics.reset(par.v)
 }
 
 
-### compute.centroids -- compute the centroid for each point on the map
+#compute.centroids -- compute the centroid for each point on the map
 # parameters:
 # - map is an object if type 'map'
-# - heat is a matrix representing the heat map representation
-# - explicit controls the shape of the connected component
 # return value:
-# - a list containing the matrices with the same x-y dims as the original map containing the centroid x-y coordinates
-
-compute.centroids <- function(map,heat,explicit=FALSE)
+# - a map of the same dimension of the input map where each cell points
+#   to the centroid of this cell.
+compute.centroids <- function(map)
 {
-  xdim <- map$xdim
-  ydim <- map$ydim
-  centroid.x <- array(data=-1,dim=c(xdim,ydim))
-  centroid.y <- array(data=-1,dim=c(xdim,ydim))
+  heat <- map$heat
+	xdim <- map$xdim
+	ydim <- map$ydim
   max.val <- max(heat)
-  
-  ### recursive function to find the centroid of a point on the map
-  compute.centroid <- function(ix,iy)
+	centroids <- array(data=list(coord()),dim=c(xdim,ydim))
+
+  ########################################################################
+  ### local recursive function to find the centroid of a point on the map
+	compute.centroid <- function(ix,iy)
   {
-    # first we check if the current position is already associated
-    # with a centroid.  if so, simply return the coordinates
-    # of that centroid
-    if (centroid.x[ix,iy] > -1 && centroid.y[ix,iy] > -1)
+  	# first we check if the current position is already associated
+  	# with a centroid.  if so, simply return the coordinates
+  	# of that centroid
+  	if ((centroids[[ix,iy]])$x > -1 && (centroids[[ix,iy]])$y > -1)
     {
-      list(bestx=centroid.x[ix,iy],besty=centroid.y[ix,iy])
-    }
-    
-    # try to find a smaller value in the immediate neighborhood
-    # make our current position the square with the minimum value.
-    # if a minimum value other than our own current value cannot be
-    # found then we are at a minimum.
-    #
-    # search the neighborhood; three different cases: inner element, corner element, side element
+  		centroids[[ix,iy]]
+  	}
+
+  	# try to find a smaller value in the immediate neighborhood
+  	# make our current position the square with the minimum value.
+  	# if a minimum value other than our own current value cannot be
+  	# found then we are at a minimum.
+  	#
+  	# search the neighborhood; three different cases: inner element, corner element, side element
     # TODO: there has to be a better way!
-    
-    min.val <- heat[ix,iy]
-    min.x <- ix
-    min.y <- iy
-    
-    # (ix,iy) is an inner map element
-    if (ix > 1 && ix < xdim && iy > 1 && iy < ydim)
+
+  	min.val <- heat[ix,iy]
+  	min.x <- ix
+  	min.y <- iy
+
+  	# (ix,iy) is an inner map element
+  	if (ix > 1 && ix < xdim && iy > 1 && iy < ydim)
     {
-      if (heat[ix-1,iy-1] < min.val)
+  		if (heat[ix-1,iy-1] < min.val)
       {
-        min.val <- heat[ix-1,iy-1]
-        min.x <- ix-1
-        min.y <- iy-1
-      }
-      if (heat[ix,iy-1] < min.val)
+  			min.val <- heat[ix-1,iy-1]
+  			min.x <- ix-1
+  			min.y <- iy-1
+  		}
+  		if (heat[ix,iy-1] < min.val)
       {
-        min.val <- heat[ix,iy-1]
-        min.x <- ix
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy-1] < min.val)
+  			min.val <- heat[ix,iy-1]
+  			min.x <- ix
+  			min.y <- iy-1
+  		}
+  		if (heat[ix+1,iy-1] < min.val)
       {
-        min.val <- heat[ix+1,iy-1]
-        min.x <- ix+1
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy] < min.val)
+  			min.val <- heat[ix+1,iy-1]
+  			min.x <- ix+1
+  			min.y <- iy-1
+  		}
+			if (heat[ix+1,iy] < min.val)
+            {
+				min.val <- heat[ix+1,iy]
+				min.x <- ix+1
+				min.y <- iy
+			}
+			if (heat[ix+1,iy+1] < min.val)
+            {
+				min.val <- heat[ix+1,iy+1]
+				min.x <- ix+1
+				min.y <- iy+1
+			}
+			if (heat[ix,iy+1] < min.val)
       {
-        min.val <- heat[ix+1,iy]
-        min.x <- ix+1
-        min.y <- iy
-      }
-      if (heat[ix+1,iy+1] < min.val)
+				min.val <- heat[ix,iy+1]
+				min.x <- ix
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy+1] < min.val)
       {
-        min.val <- heat[ix+1,iy+1]
-        min.x <- ix+1
-        min.y <- iy+1
-      }
-      if (heat[ix,iy+1] < min.val)
+				min.val <- heat[ix-1,iy+1]
+				min.x <- ix-1
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy] < min.val)
       {
-        min.val <- heat[ix,iy+1]
-        min.x <- ix
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy+1] < min.val)
-      {
-        min.val <- heat[ix-1,iy+1]
-        min.x <- ix-1
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy] < min.val)
-      {
-        min.val <- heat[ix-1,iy]
-        min.x <- ix-1
-        min.y <- iy
-      }
-    }
-    
-    # (ix,iy) is bottom left corner
-    else if (ix == 1 && iy == 1)
+				min.val <- heat[ix-1,iy]
+				min.x <- ix-1
+				min.y <- iy
+			}
+		}
+
+		# (ix,iy) is bottom left corner
+		else if (ix == 1 && iy == 1)
     {
-      if (heat[ix+1,iy] < min.val)
-      {
-        min.val <- heat[ix+1,iy]
-        min.x <- ix+1
-        min.y <- iy
-      }
-      if (heat[ix+1,iy+1] < min.val)
-      {
-        min.val <- heat[ix+1,iy+1]
-        min.x <- ix+1
-        min.y <- iy+1
-      }
-      if (heat[ix,iy+1] < min.val)
-      {
-        min.val <- heat[ix,iy+1]
-        min.x <- ix
-        min.y <- iy+1
-      }
-    }
-    
-    # (ix,iy) is bottom right corner
-    else if (ix == xdim && iy == 1)
+			if (heat[ix+1,iy] < min.val)
+            {
+				min.val <- heat[ix+1,iy]
+				min.x <- ix+1
+				min.y <- iy
+			}
+			if (heat[ix+1,iy+1] < min.val)
+            {
+				min.val <- heat[ix+1,iy+1]
+				min.x <- ix+1
+				min.y <- iy+1
+			}
+			if (heat[ix,iy+1] < min.val)
+            {
+				min.val <- heat[ix,iy+1]
+				min.x <- ix
+				min.y <- iy+1
+			}
+		}
+
+		# (ix,iy) is bottom right corner
+		else if (ix == xdim && iy == 1)
     {
-      if (heat[ix,iy+1] < min.val)
+			if (heat[ix,iy+1] < min.val)
       {
-        min.val <- heat[ix,iy+1]
-        min.x <- ix
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy+1] < min.val)
+				min.val <- heat[ix,iy+1]
+				min.x <- ix
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy+1] < min.val)
       {
-        min.val <- heat[ix-1,iy+1]
-        min.x <- ix-1
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy] < min.val)
+				min.val <- heat[ix-1,iy+1]
+				min.x <- ix-1
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy] < min.val)
       {
-        min.val <- heat[ix-1,iy]
-        min.x <- ix-1
-        min.y <- iy
-      }
-    }
-    
-    # (ix,iy) is top right corner
-    else if (ix == xdim && iy == ydim)
+				min.val <- heat[ix-1,iy]
+				min.x <- ix-1
+				min.y <- iy
+			}
+		}
+
+		# (ix,iy) is top right corner
+		else if (ix == xdim && iy == ydim)
     {
-      if (heat[ix-1,iy-1] < min.val)
+			if (heat[ix-1,iy-1] < min.val)
       {
-        min.val <- heat[ix-1,iy-1]
-        min.x <- ix-1
-        min.y <- iy-1
-      }
-      if (heat[ix,iy-1] < min.val)
+				min.val <- heat[ix-1,iy-1]
+				min.x <- ix-1
+				min.y <- iy-1
+			}
+			if (heat[ix,iy-1] < min.val)
       {
-        min.val <- heat[ix,iy-1]
-        min.x <- ix
-        min.y <- iy-1
-      }
-      if (heat[ix-1,iy] < min.val)
+				min.val <- heat[ix,iy-1]
+				min.x <- ix
+				min.y <- iy-1
+			}
+			if (heat[ix-1,iy] < min.val)
       {
-        min.val <- heat[ix-1,iy]
-        min.x <- ix-1
-        min.y <- iy
-      }
-    }
-    
-    # (ix,iy) is top left corner
-    else if (ix == 1 && iy == ydim)
+				min.val <- heat[ix-1,iy]
+				min.x <- ix-1
+				min.y <- iy
+			}
+		}
+
+		# (ix,iy) is top left corner
+		else if (ix == 1 && iy == ydim)
     {
-      if (heat[ix,iy-1] < min.val)
+			if (heat[ix,iy-1] < min.val)
       {
-        min.val <- heat[ix,iy-1]
-        min.x <- ix
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy-1] < min.val)
+				min.val <- heat[ix,iy-1]
+				min.x <- ix
+				min.y <- iy-1
+			}
+			if (heat[ix+1,iy-1] < min.val)
       {
-        min.val <- heat[ix+1,iy-1]
-        min.x <- ix+1
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy] < min.val)
+				min.val <- heat[ix+1,iy-1]
+				min.x <- ix+1
+				min.y <- iy-1
+			}
+			if (heat[ix+1,iy] < min.val)
       {
-        min.val <- heat[ix+1,iy]
-        min.x <- ix+1
-        min.y <- iy
-      }
-    }
-    
-    # (ix,iy) is a left side element
-    else if (ix == 1  && iy > 1 && iy < ydim)
+				min.val <- heat[ix+1,iy]
+				min.x <- ix+1
+				min.y <- iy
+			}
+		}
+
+		# (ix,iy) is a left side element
+		else if (ix == 1  && iy > 1 && iy < ydim)
     {
-      if (heat[ix,iy-1] < min.val)
+			if (heat[ix,iy-1] < min.val)
       {
-        min.val <- heat[ix,iy-1]
-        min.x <- ix
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy-1] < min.val)
+				min.val <- heat[ix,iy-1]
+				min.x <- ix
+				min.y <- iy-1
+			}
+			if (heat[ix+1,iy-1] < min.val)
       {
-        min.val <- heat[ix+1,iy-1]
-        min.x <- ix+1
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy] < min.val)
+				min.val <- heat[ix+1,iy-1]
+				min.x <- ix+1
+				min.y <- iy-1
+			}
+			if (heat[ix+1,iy] < min.val)
       {
-        min.val <- heat[ix+1,iy]
-        min.x <- ix+1
-        min.y <- iy
-      }
-      if (heat[ix+1,iy+1] < min.val)
+				min.val <- heat[ix+1,iy]
+				min.x <- ix+1
+				min.y <- iy
+			}
+			if (heat[ix+1,iy+1] < min.val)
       {
-        min.val <- heat[ix+1,iy+1]
-        min.x <- ix+1
-        min.y <- iy+1
-      }
-      if (heat[ix,iy+1] < min.val)
+				min.val <- heat[ix+1,iy+1]
+				min.x <- ix+1
+				min.y <- iy+1
+			}
+			if (heat[ix,iy+1] < min.val)
       {
-        min.val <- heat[ix,iy+1]
-        min.x <- ix
-        min.y <- iy+1
-      }
-    }
-    
-    # (ix,iy) is a bottom side element
-    else if (ix > 1 && ix < xdim && iy == 1 )
+				min.val <- heat[ix,iy+1]
+				min.x <- ix
+				min.y <- iy+1
+			}
+		}
+
+		# (ix,iy) is a bottom side element
+		else if (ix > 1 && ix < xdim && iy == 1 )
     {
-      if (heat[ix+1,iy] < min.val)
+			if (heat[ix+1,iy] < min.val)
       {
-        min.val <- heat[ix+1,iy]
-        min.x <- ix+1
-        min.y <- iy
-      }
-      if (heat[ix+1,iy+1] < min.val)
+				min.val <- heat[ix+1,iy]
+				min.x <- ix+1
+				min.y <- iy
+			}
+			if (heat[ix+1,iy+1] < min.val)
       {
-        min.val <- heat[ix+1,iy+1]
-        min.x <- ix+1
-        min.y <- iy+1
-      }
-      if (heat[ix,iy+1] < min.val)
+				min.val <- heat[ix+1,iy+1]
+				min.x <- ix+1
+				min.y <- iy+1
+			}
+			if (heat[ix,iy+1] < min.val)
       {
-        min.val <- heat[ix,iy+1]
-        min.x <- ix
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy+1] < min.val)
+				min.val <- heat[ix,iy+1]
+				min.x <- ix
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy+1] < min.val)
       {
-        min.val <- heat[ix-1,iy+1]
-        min.x <- ix-1
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy] < min.val)
+				min.val <- heat[ix-1,iy+1]
+				min.x <- ix-1
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy] < min.val)
       {
-        min.val <- heat[ix-1,iy]
-        min.x <- ix-1
-        min.y <- iy
-      }
-    }
-    
-    # (ix,iy) is a right side element
-    else if (ix == xdim && iy > 1 && iy < ydim)
+				min.val <- heat[ix-1,iy]
+				min.x <- ix-1
+				min.y <- iy
+			}
+		}
+
+		# (ix,iy) is a right side element
+		else if (ix == xdim && iy > 1 && iy < ydim)
     {
-      if (heat[ix-1,iy-1] < min.val)
+			if (heat[ix-1,iy-1] < min.val)
       {
-        min.val <- heat[ix-1,iy-1]
-        min.x <- ix-1
-        min.y <- iy-1
-      }
-      if (heat[ix,iy-1] < min.val)
+				min.val <- heat[ix-1,iy-1]
+				min.x <- ix-1
+				min.y <- iy-1
+			}
+			if (heat[ix,iy-1] < min.val)
       {
-        min.val <- heat[ix,iy-1]
-        min.x <- ix
-        min.y <- iy-1
-      }
-      if (heat[ix,iy+1] < min.val)
+				min.val <- heat[ix,iy-1]
+				min.x <- ix
+				min.y <- iy-1
+			}
+			if (heat[ix,iy+1] < min.val)
       {
-        min.val <- heat[ix,iy+1]
-        min.x <- ix
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy+1] < min.val)
+				min.val <- heat[ix,iy+1]
+				min.x <- ix
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy+1] < min.val)
       {
-        min.val <- heat[ix-1,iy+1]
-        min.x <- ix-1
-        min.y <- iy+1
-      }
-      if (heat[ix-1,iy] < min.val)
+				min.val <- heat[ix-1,iy+1]
+				min.x <- ix-1
+				min.y <- iy+1
+			}
+			if (heat[ix-1,iy] < min.val)
       {
-        min.val <- heat[ix-1,iy]
-        min.x <- ix-1
-        min.y <- iy
-      }
-    }
-    
-    # (ix,iy) is a top side element
-    else if (ix > 1 && ix < xdim && iy == ydim)
+				min.val <- heat[ix-1,iy]
+				min.x <- ix-1
+				min.y <- iy
+			}
+		}
+
+		# (ix,iy) is a top side element
+		else if (ix > 1 && ix < xdim && iy == ydim)
     {
-      if (heat[ix-1,iy-1] < min.val)
+			if (heat[ix-1,iy-1] < min.val)
       {
-        min.val <- heat[ix-1,iy-1]
-        min.x <- ix-1
-        min.y <- iy-1
-      }
-      if (heat[ix,iy-1] < min.val)
+				min.val <- heat[ix-1,iy-1]
+				min.x <- ix-1
+				min.y <- iy-1
+			}
+			if (heat[ix,iy-1] < min.val)
       {
-        min.val <- heat[ix,iy-1]
-        min.x <- ix
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy-1] < min.val)
+				min.val <- heat[ix,iy-1]
+				min.x <- ix
+				min.y <- iy-1
+			}
+			if (heat[ix+1,iy-1] < min.val)
       {
-        min.val <- heat[ix+1,iy-1]
-        min.x <- ix+1
-        min.y <- iy-1
-      }
-      if (heat[ix+1,iy] < min.val)
+				min.val <- heat[ix+1,iy-1]
+				min.x <- ix+1
+				min.y <- iy-1
+			}
+			if (heat[ix+1,iy] < min.val)
       {
-        min.val <- heat[ix+1,iy]
-        min.x <- ix+1
-        min.y <- iy
-      }
-      if (heat[ix-1,iy] < min.val)
+				min.val <- heat[ix+1,iy]
+				min.x <- ix+1
+				min.y <- iy
+			}
+			if (heat[ix-1,iy] < min.val)
       {
-        min.val <- heat[ix-1,iy]
-        min.x <- ix-1
-        min.y <- iy
-      }
-    }
-    
-    #if successful
-    # move to the square with the smaller value, i.e., call compute.centroid on this new square
-    # note the RETURNED x-y coords in the centroid.x and centroid.y matrix at the current location
-    # return the RETURNED x-y coordinates
-    if (min.x != ix || min.y != iy)
+				min.val <- heat[ix-1,iy]
+				min.x <- ix-1
+				min.y <- iy
+			}
+		}
+
+		# if successful
+		# move to the square with the smaller value and
+    # call compute.centroid on this new square
+		if (min.x != ix || min.y != iy)
     {
-      r.val <- compute.centroid(min.x,min.y)
-      
-      # if explicit is set show the exact connected component
-      # otherwise construct a connected componenent where all
-      # nodes are connected to a centrol node
-      if (explicit)
-      {
-        centroid.x[ix,iy] <<- min.x
-        centroid.y[ix,iy] <<- min.y
-        list(bestx=min.x,besty=min.y)
-      }
-      else
-      {
-        centroid.x[ix,iy] <<- r.val$bestx
-        centroid.y[ix,iy] <<- r.val$besty
-        r.val
-      }
-    }
-    #else
-    # we have found a minimum
-    # note the current x-y in the centroid.x and centroid.y matrix
-    # return the current x-y coordinates
-    else
+      # Note: returns a list of an x and y coordinate
+			compute.centroid(min.x,min.y)
+		}
+		#else
+		# we have found a minimum -- this is our centroid.
+		else
     {
-      centroid.x[ix,iy] <<- ix
-      centroid.y[ix,iy] <<- iy
-      list(bestx=ix,besty=iy)
-    }
-  } # end function compute.centroid
-  
-  ### iterate over the map and find the centroid for each element
-  for (i in 1:xdim)
+			coord(ix,iy)
+		}
+	} # end function compute.centroid
+  ###########################################################################
+
+	### iterate over the map and find the centroid for each element
+	for (i in 1:xdim)
   {
-    for (j in 1:ydim)
+		for (j in 1:ydim)
     {
-      compute.centroid(i,j)
-    }
-  }
-  
-  list(centroid.x=centroid.x,centroid.y=centroid.y)
+			centroids[[i,j]] <- compute.centroid(i,j)
+		}
+	}
+  centroids
 }
 
-
-### compute.umat -- compute the unified distance matrix
+# compute.heat -- compute a heat value map representation of the given distance matrix
 # parameters:
 # - map is an object if type 'map'
-# - smoothing is either NULL, 0, or a positive floating point value controlling the
-#         smoothing of the umat representation
-# return value:
-# - a matrix with the same x-y dims as the original map containing the umat values
-
-compute.umat <- function(map,smoothing=NULL)
-{
-  d <- dist(data.frame(map$neurons))
-  umat <- compute.heat(map,d,smoothing)
-  
-  umat
-}
-
-### compute.heat -- compute a heat value map representation of the given distance matrix
-# parameters:
-# - map is an object if type 'map'
-# - d is a distance matrix computed via the 'dist' function
-# - smoothing is either NULL, 0, or a positive floating point value controlling the
-#         smoothing of the umat representation
 # return value:
 # - a matrix with the same x-y dims as the original map containing the heat
-
-compute.heat <- function(map,d.in,smoothing=NULL)
+compute.heat <- function(map)
 {
-  d <- as.matrix(d.in)
-  x <- map$xdim
-  y <- map$ydim
-  heat <- array(data=0,dim=c(x,y))
-  
-  if (x == 1 || y == 1)
-    stop("compute.heat: heat map can not be computed for a map with a dimension of 1")
-  
-  # this function translates our 2-dim map coordinates
-  # into the 1-dim coordinates of the neurons
-  xl <- function(ix,iy)
+	d <- as.matrix(dist(data.frame(map$neurons)))
+	x <- map$xdim
+	y <- map$ydim
+	heat <- array(data=0,dim=c(x,y))
+
+	if (x == 1 || y == 1)
+		stop("compute.heat: heat map can not be computed for a map with a dimension of 1")
+
+  # local function as a shorthand for rowix
+	xl <- function(ix,iy)
   {
     #cat("converting (",ix,",",iy,") to row", ix + (iy-1) *xdim,"\n")
-    ix + (iy-1) * x
-  }
-  
-  # check if the map is larger than 2 x 2 (otherwise it is only corners)
-  if (x > 2 && y > 2)
+		#ix + (iy-1) * x
+    rowix(map,coord(ix,iy))
+	}
+
+	# check if the map is larger than 2 x 2 (otherwise it is only corners)
+	if (x > 2 && y > 2)
   {
-    # iterate over the inner nodes and compute their umat values
-    for (ix in 2:(x-1))
+		# iterate over the inner nodes and compute their umat values
+		for (ix in 2:(x-1))
     {
-      for (iy in 2:(y-1))
+			for (iy in 2:(y-1))
       {
-        sum <-
-          d[xl(ix,iy),xl(ix-1,iy-1)] +
-          d[xl(ix,iy),xl(ix,iy-1)] +
-          d[xl(ix,iy),xl(ix+1,iy-1)] +
-          d[xl(ix,iy),xl(ix+1,iy)] +
-          d[xl(ix,iy),xl(ix+1,iy+1)] +
-          d[xl(ix,iy),xl(ix,iy+1)] +
-          d[xl(ix,iy),xl(ix-1,iy+1)] +
-          d[xl(ix,iy),xl(ix-1,iy)]
-        heat[ix,iy] <- sum/8
-      }
-      
-    }
-    
-    # iterate over bottom x axis
-    for (ix in 2:(x-1))
+				sum <-
+					   d[xl(ix,iy),xl(ix-1,iy-1)] +
+					   d[xl(ix,iy),xl(ix,iy-1)] +
+					   d[xl(ix,iy),xl(ix+1,iy-1)] +
+					   d[xl(ix,iy),xl(ix+1,iy)] +
+					   d[xl(ix,iy),xl(ix+1,iy+1)] +
+					   d[xl(ix,iy),xl(ix,iy+1)] +
+					   d[xl(ix,iy),xl(ix-1,iy+1)] +
+					   d[xl(ix,iy),xl(ix-1,iy)]
+				heat[ix,iy] <- sum/8
+			}
+		}
+
+		# iterate over bottom x axis
+		for (ix in 2:(x-1))
     {
-      iy <- 1
-      sum <-
-        d[xl(ix,iy),xl(ix+1,iy)] +
-        d[xl(ix,iy),xl(ix+1,iy+1)] +
-        d[xl(ix,iy),xl(ix,iy+1)] +
-        d[xl(ix,iy),xl(ix-1,iy+1)] +
-        d[xl(ix,iy),xl(ix-1,iy)]
-      heat[ix,iy] <- sum/5
-    }
-    
-    # iterate over top x axis
-    for (ix in 2:(x-1))
+			iy <- 1
+			sum <-
+				   d[xl(ix,iy),xl(ix+1,iy)] +
+				   d[xl(ix,iy),xl(ix+1,iy+1)] +
+				   d[xl(ix,iy),xl(ix,iy+1)] +
+				   d[xl(ix,iy),xl(ix-1,iy+1)] +
+				   d[xl(ix,iy),xl(ix-1,iy)]
+			heat[ix,iy] <- sum/5
+		}
+
+		# iterate over top x axis
+		for (ix in 2:(x-1))
     {
-      iy <- y
-      sum <-
-        d[xl(ix,iy),xl(ix-1,iy-1)] +
-        d[xl(ix,iy),xl(ix,iy-1)] +
-        d[xl(ix,iy),xl(ix+1,iy-1)] +
-        d[xl(ix,iy),xl(ix+1,iy)] +
-        d[xl(ix,iy),xl(ix-1,iy)]
-      heat[ix,iy] <- sum/5
-    }
-    
-    # iterate over the left y-axis
-    for (iy in 2:(y-1))
+			iy <- y
+			sum <-
+				   d[xl(ix,iy),xl(ix-1,iy-1)] +
+				   d[xl(ix,iy),xl(ix,iy-1)] +
+				   d[xl(ix,iy),xl(ix+1,iy-1)] +
+				   d[xl(ix,iy),xl(ix+1,iy)] +
+				   d[xl(ix,iy),xl(ix-1,iy)]
+			heat[ix,iy] <- sum/5
+		}
+
+		# iterate over the left y-axis
+		for (iy in 2:(y-1))
     {
-      ix <- 1
-      sum <-
-        d[xl(ix,iy),xl(ix,iy-1)] +
-        d[xl(ix,iy),xl(ix+1,iy-1)] +
-        d[xl(ix,iy),xl(ix+1,iy)] +
-        d[xl(ix,iy),xl(ix+1,iy+1)] +
-        d[xl(ix,iy),xl(ix,iy+1)]
-      heat[ix,iy] <- sum/5
-    }
-    
-    # iterate over the right y-axis
-    for (iy in 2:(y-1))
+			ix <- 1
+			sum <-
+				   d[xl(ix,iy),xl(ix,iy-1)] +
+				   d[xl(ix,iy),xl(ix+1,iy-1)] +
+				   d[xl(ix,iy),xl(ix+1,iy)] +
+				   d[xl(ix,iy),xl(ix+1,iy+1)] +
+				   d[xl(ix,iy),xl(ix,iy+1)]
+			heat[ix,iy] <- sum/5
+		}
+
+		# iterate over the right y-axis
+		for (iy in 2:(y-1))
     {
-      ix <- x
-      sum <-
-        d[xl(ix,iy),xl(ix-1,iy-1)] +
-        d[xl(ix,iy),xl(ix,iy-1)] +
-        d[xl(ix,iy),xl(ix,iy+1)] +
-        d[xl(ix,iy),xl(ix-1,iy+1)] +
-        d[xl(ix,iy),xl(ix-1,iy)]
-      heat[ix,iy] <- sum/5
-    }
-  } # end if
-  
-  # compute umat values for corners
-  if (x >= 2 && y >= 2)
+			ix <- x
+			sum <-
+				   d[xl(ix,iy),xl(ix-1,iy-1)] +
+				   d[xl(ix,iy),xl(ix,iy-1)] +
+				   d[xl(ix,iy),xl(ix,iy+1)] +
+				   d[xl(ix,iy),xl(ix-1,iy+1)] +
+				   d[xl(ix,iy),xl(ix-1,iy)]
+			heat[ix,iy] <- sum/5
+		}
+	} # end if
+
+	# compute umat values for corners
+	if (x >= 2 && y >= 2)
+    {
+		# bottom left corner
+		ix <- 1
+		iy <- 1
+		sum <-
+				d[xl(ix,iy),xl(ix+1,iy)] +
+				d[xl(ix,iy),xl(ix+1,iy+1)] +
+				d[xl(ix,iy),xl(ix,iy+1)]
+		heat[ix,iy] <- sum/3
+
+		# bottom right corner
+		ix <- x
+		iy <- 1
+		sum <-
+			   d[xl(ix,iy),xl(ix,iy+1)] +
+			   d[xl(ix,iy),xl(ix-1,iy+1)] +
+			   d[xl(ix,iy),xl(ix-1,iy)]
+		heat[ix,iy] <- sum/3
+
+		# top left corner
+		ix <- 1
+		iy <- y
+		sum <-
+				d[xl(ix,iy),xl(ix,iy-1)] +
+				d[xl(ix,iy),xl(ix+1,iy-1)] +
+				d[xl(ix,iy),xl(ix+1,iy)]
+		heat[ix,iy] <- sum/3
+
+		# top right corner
+		ix <- x
+		iy <- y
+		sum <-
+				d[xl(ix,iy),xl(ix-1,iy-1)] +
+				d[xl(ix,iy),xl(ix,iy-1)] +
+				d[xl(ix,iy),xl(ix-1,iy)]
+		heat[ix,iy] <- sum/3
+	} # end if
+
+	# smooth the heat map
+	xcoords <- c()
+	ycoords <- c()
+	for (i in 1:y)
   {
-    # bottom left corner
-    ix <- 1
-    iy <- 1
-    sum <-
-      d[xl(ix,iy),xl(ix+1,iy)] +
-      d[xl(ix,iy),xl(ix+1,iy+1)] +
-      d[xl(ix,iy),xl(ix,iy+1)]
-    heat[ix,iy] <- sum/3
-    
-    # bottom right corner
-    ix <- x
-    iy <- 1
-    sum <-
-      d[xl(ix,iy),xl(ix,iy+1)] +
-      d[xl(ix,iy),xl(ix-1,iy+1)] +
-      d[xl(ix,iy),xl(ix-1,iy)]
-    heat[ix,iy] <- sum/3
-    
-    # top left corner
-    ix <- 1
-    iy <- y
-    sum <-
-      d[xl(ix,iy),xl(ix,iy-1)] +
-      d[xl(ix,iy),xl(ix+1,iy-1)] +
-      d[xl(ix,iy),xl(ix+1,iy)]
-    heat[ix,iy] <- sum/3
-    
-    # top right corner
-    ix <- x
-    iy <- y
-    sum <-
-      d[xl(ix,iy),xl(ix-1,iy-1)] +
-      d[xl(ix,iy),xl(ix,iy-1)] +
-      d[xl(ix,iy),xl(ix-1,iy)]
-    heat[ix,iy] <- sum/3
-  } # end if
-  
-  # smooth the heat map
-  xcoords <- c()
-  ycoords <- c()
-  for (i in 1:y) {
-    for (j in 1:x) {
-      ycoords <- c(ycoords, i)
-      xcoords <- c(xcoords, j)
-    }
-  }
-  xycoords <- data.frame(xcoords,ycoords)
-  
-  if (!is.null(smoothing)) {
-    if (smoothing == 0)
-      heat <- smooth.2d(as.vector(heat),x=as.matrix(xycoords),nrow=x,ncol=y,surface=FALSE)
-    else if (smoothing > 0)
-      heat <- smooth.2d(as.vector(heat),x=as.matrix(xycoords),nrow=x,ncol=y,surface=FALSE,theta=smoothing)
-    else
-      stop("compute.heat: bad value for smoothing parameter")
-  }
-  
-  heat
+		for (j in 1:x)
+    {
+			ycoords <- c(ycoords, i)
+			xcoords <- c(xcoords, j)
+		}
+	}
+	xycoords <- data.frame(xcoords,ycoords)
+  heat <- smooth.2d(as.vector(heat),x=as.matrix(xycoords),nrow=x,ncol=y,surface=FALSE,theta=2)
+
+	heat
 }
 
-### df.var.test -- a function that applies the F-test testing the ratio
+# df.var.test -- a function that applies the F-test testing the ratio
 #                  of the variances of the two data frames
 # parameters:
 # - df1,df2 - data frames with the same number of columns
 # - conf - confidence level for the F-test (default .95)
-
 df.var.test <- function(df1,df2,conf = .95)
 {
-  if (length(df1) != length(df2))
-    stop("df.var.test: cannot compare variances of data frames")
-  
-  # init our working arrays
-  var.ratio.v <- array(data=1,dim=length(df1))
-  var.confintlo.v <- array(data=1,dim=length(df1))
-  var.confinthi.v <- array(data=1,dim=length(df1))
-  
-  # compute the F-test on each feature in our populations
-  for (i in 1:length(df1))
-  {
-    t <- var.test(df1[[i]],df2[[i]],conf.level=conf)
-    var.ratio.v[i] <- t$estimate
-    #cat("Feature",i,"confidence interval =",t$conf.int,"\n")
-    var.confintlo.v[i] <- t$conf.int[1]
-    var.confinthi.v[i] <- t$conf.int[2]
-  }
-  
-  # return a list with the ratios and conf intervals for each feature
-  list(ratio=var.ratio.v,conf.int.lo=var.confintlo.v,conf.int.hi=var.confinthi.v)
+	if (length(df1) != length(df2))
+        stop("df.var.test: cannot compare variances of data frames")
+
+	# init our working arrays
+	var.ratio.v <- array(data=1,dim=length(df1))
+	var.confintlo.v <- array(data=1,dim=length(df1))
+	var.confinthi.v <- array(data=1,dim=length(df1))
+
+	# compute the F-test on each feature in our populations
+	for (i in 1:length(df1))
+    {
+		t <- var.test(df1[[i]],df2[[i]],conf.level=conf)
+		var.ratio.v[i] <- t$estimate
+		#cat("Feature",i,"confidence interval =",t$conf.int,"\n")
+		var.confintlo.v[i] <- t$conf.int[1]
+		var.confinthi.v[i] <- t$conf.int[2]
+	}
+
+	# return a list with the ratios and conf intervals for each feature
+	list(ratio=var.ratio.v,conf.int.lo=var.confintlo.v,conf.int.hi=var.confinthi.v)
 }
 
-### df.mean.test -- a function that applies the t-test testing the difference
+# df.mean.test -- a function that applies the t-test testing the difference
 #                   of the means of the two data frames
 # parameters:
 # - df1,df2 - data frames with the same number of columns
 # - conf - confidence level for the t-test (default .95)
-
 df.mean.test <- function(df1,df2,conf = .95)
 {
-  if (ncol(df1) != ncol(df2))
-    stop("df.mean.test: cannot compare means of data frames")
-  
-  # init our working arrays
-  mean.diff.v <- array(data=1,dim=ncol(df1))
-  mean.confintlo.v <- array(data=1,dim=ncol(df1))
-  mean.confinthi.v <- array(data=1,dim=ncol(df1))
-  
-  # compute the F-test on each feature in our populations
-  for (i in 1:ncol(df1)) {
-    t <- t.test(x=df1[[i]],y=df2[[i]],conf.level=conf)
-    mean.diff.v[i] <- t$estimate[1] - t$estimate[2]
-    #cat("Feature",i,"confidence interval =",t$conf.int,"\n")
-    mean.confintlo.v[i] <- t$conf.int[1]
-    mean.confinthi.v[i] <- t$conf.int[2]
-  }
-  
-  # return a list with the mean differences and conf intervals for each feature
-  list(diff=mean.diff.v,conf.int.lo=mean.confintlo.v,conf.int.hi=mean.confinthi.v)
+	if (ncol(df1) != ncol(df2))
+        stop("df.mean.test: cannot compare means of data frames")
+
+	# init our working arrays
+	mean.diff.v <- array(data=1,dim=ncol(df1))
+	mean.confintlo.v <- array(data=1,dim=ncol(df1))
+	mean.confinthi.v <- array(data=1,dim=ncol(df1))
+
+	# compute the F-test on each feature in our populations
+	for (i in 1:ncol(df1)) {
+		t <- t.test(x=df1[[i]],y=df2[[i]],conf.level=conf)
+		mean.diff.v[i] <- t$estimate[1] - t$estimate[2]
+		#cat("Feature",i,"confidence interval =",t$conf.int,"\n")
+		mean.confintlo.v[i] <- t$conf.int[1]
+		mean.confinthi.v[i] <- t$conf.int[2]
+	}
+
+	# return a list with the mean differences and conf intervals for each feature
+	list(diff=mean.diff.v,conf.int.lo=mean.confintlo.v,conf.int.hi=mean.confinthi.v)
 }
 
-### vsom.r - vectorized, unoptimized version of the stochastic SOM training algorithm written entirely in R
-vsom.r <- function(data,xdim,ydim,alpha,train)
+
+# vsom.f - vectorized and optimized version of the stochastic
+# SOM training algorithm written in Fortran90
+vsom.f <- function(data,xdim,ydim,alpha,train,seed)
 {
-  ### some constants
-  dr <- nrow(data)
-  dc <- ncol(data)
-  nr <- xdim*ydim
-  nc <- dc # dim of data and neurons is the same
-  
-  ### build and initialize the matrix holding the neurons
-  cells <- nr * nc        # no. of neurons times number of data dimensions
-  v <- runif(cells,-1,1)  # vector with small init values for all neurons
-  # NOTE: each row represents a neuron, each column represents a dimension.
-  neurons <- matrix(v,nrow=nr,ncol=nc)  # rearrange the vector as matrix
-  
-  ### compute the initial neighborhood size and step
-  #nsize <- ceiling(sqrt(xdim^2 + ydim^2))
-  nsize <- max(xdim,ydim) + 1
-  nsize.step <- ceiling(train/nsize)
-  step.counter <- 0 # counts the number of epochs per nsize.step
-  
-  # convert a 1D rowindex into a 2D map coordinate
-  coord2D <- function(rowix)
-  {
-    x <- (rowix-1) %% xdim + 1
-    y <- (rowix-1) %/% xdim + 1
-    
-    c(x,y)
-  }
-  
-  # constants for the Gamma function
-  m <- c(1:nr)                     # a vector with all neuron 1D addresses
-  m2Ds <- matrix(coord2D(m),nr,2)  # x-y coordinate of ith neuron: m2Ds[i,] = c(xi,yi)
-  
-  ### neighborhood function
-  Gamma <- function(c)
-  {
-    c2D <- m2Ds[c,]                          # lookup the 2D map coordinate for c
-    c2Ds <- rep(1,nr) %o% c2D                # a matrix with each row equal to c2D
-    d <- sqrt((c2Ds - m2Ds)^2 %*% c(1,1))    # distance vector of each neuron from c in terms of map coords!
-    hood <- ifelse(d < nsize*1.5,alpha,0.0)  # if m on the grid is in neigh then alpha else 0.0
-    
-    as.vector(hood)
-  }
-  
-  ### training ###
-  ### the epochs loop
-  for (epoch in 1:train)
-  {
-    # hood size decreases in disrete nsize.steps
-    step.counter <- step.counter + 1
-    if (step.counter == nsize.step)
+    ### some constants
+    dr <- nrow(data)
+    dc <- ncol(data)
+    nr <- xdim*ydim
+    nc <- dc # dim of data and neurons is the same
+
+    ### build and initialize the matrix holding the neurons
+    if (!is.null(seed))
     {
-      step.counter <- 0
-      nsize <- nsize - 1
+        set.seed(seed)
     }
-    
-    # create a sample training vector
-    ix <- sample(1:dr,1)
-    xk <- as.numeric(data[ix,])
-    
-    ### competitive step
-    xk.m <- rep(1,nr) %o% xk
-    diff <- neurons - xk.m
-    squ <- diff * diff
-    s <- squ %*% rep(1,nc)
-    o <- order(s)
-    c <- o[1]
-    
-    ### update step
-    gamma.m <- Gamma(c) %o% rep(1,nc)
-    neurons <- neurons - diff * gamma.m
-  }
-  
-  neurons
-}
-
-### vsom.f - vectorized and optimized version of the stochastic SOM training algorithm written in Fortran90
-vsom.f <- function(data,xdim,ydim,alpha,train)
-{
-  ### some constants
-  dr <- nrow(data)
-  dc <- ncol(data)
-  nr <- xdim*ydim
-  nc <- dc # dim of data and neurons is the same
-  
-  ### build and initialize the matrix holding the neurons
-  cells <- nr * nc        # no. of neurons times number of data dimensions
-  v <- runif(cells,-1,1)  # vector with small init values for all neurons
-  # NOTE: each row represents a neuron, each column represents a dimension.
-  neurons <- matrix(v,nrow=nr,ncol=nc)  # rearrange the vector as matrix
-  
-  
-  result <- .Fortran("vsom",
-                     as.single(neurons),
-                     as.single(data.matrix(data)),
-                     as.integer(dr),
-                     as.integer(dc),
-                     as.integer(xdim),
-                     as.integer(ydim),
-                     as.single(alpha),
-                     as.integer(train),
-                     PACKAGE="popsom")
-  
-  # unpack the structure and list in result[1]
-  v <- result[1]
-  neurons <- matrix(v[[1]],nrow=nr,ncol=nc,byrow=FALSE)  # rearrange the result vector as matrix
-  
-  neurons
-}
-
-# batchsom.private - a wrapper around the batch training algorithm from 'class'
-batchsom.private <- function(data,grid,min.radius,max.radius,train,init,radius.type)
-{
-  set.seed(10)
-  
-  initt <- pmatch(init, c("random","sample"))
-  radius.type <- pmatch(radius.type,c("gaussian","bubble"))
-  
-  data <- as.matrix(data)
-  nd <- nrow(data)
-  ng <- nrow(grid$pts)
-  
-  xdim<- grid$xdim
-  ydim<- grid$ydim
-  
-  maxit <- ceiling(train/nd)
-  
-  if(initt == 1){
-    init <- matrix(NA, grid$xdim * grid$ydim, dim(data)[2])
-    mi <- apply(data, 2, min)
-    ma <- apply(data, 2, max)
-    for (i in 1:(xdim*ydim)){
-      init[i,] <- mi + (ma - mi) * runif(ncol(init))
+    else
+    {
+        # send a -1 to Fortran function to indicate no seed present
+        seed <- -1
     }
-  }
-  else if (initt == 2){
-    init <- data[sample(1L:nd, ng, replace = FALSE), , drop = FALSE]
-  }
-  
-  nhbrdist <- as.matrix(dist(grid$pts))
-  radii<- seq(max.radius,min.radius,len=maxit)
-  
-  for(i in 1:maxit)
-  {
-    cl <- as.numeric(knn1(init, data, 1L:ng))
-    if(radius.type == 1)
-      A <- exp(-nhbrdist/(2*radii[i]))[,cl]
-    else if (radius.type == 2)
-      A <- (nhbrdist <= radii[i])[,cl]
-    ind <- rowSums(A) > 0
-    init[ind, ] <- A[ind, ] %*% data / rowSums(A)[ind]
-  }
-  
-  list(classif=cl,codes=init,grid=grid)
+    cells <- nr * nc        # no. of neurons times number of data dimensions
+    v <- runif(cells,-1,1)  # vector with small init values for all neurons
+    # NOTE: each row represents a neuron, each column represents a dimension.
+    neurons <- matrix(v,nrow=nr,ncol=nc)  # rearrange the vector as matrix
+
+    result <- .Fortran("vsom",
+                       as.single(neurons),
+                       as.single(data.matrix(data)),
+                       as.integer(dr),
+                       as.integer(dc),
+                       as.integer(xdim),
+                       as.integer(ydim),
+                       as.single(alpha),
+                       as.integer(train),
+#                       as.integer(seed))
+                       as.integer(seed),
+                       PACKAGE="popsom")
+
+    # unpack the structure and list in result[1]
+    v <- result[1]
+    neurons <- matrix(v[[1]],nrow=nr,ncol=nc,byrow=FALSE)  # rearrange the result vector as matrix
+
+    neurons
 }
 
-#Functions to Combine connected components that represent the same cluster
-##### TOP LEVEL FOR DISTANCE MATRIX ORIENTED CLUSTER COMBINE####
-
-compute.combined.clusters <- function(map,heat,explicit,range) {
-  # compute the connected components
-  centroids <- compute.centroids(map,heat,explicit)
-  #Get unique centroids
-  unique.centroids <- get.unique.centroids(map, centroids)
-  #Get distance from centroid to cluster elements for all centroids
-  within_cluster_dist <- distance.from.centroids(map, centroids, unique.centroids, heat)
-  #Get average pairwise distance between clusters
-  between_cluster_dist <- distance.between.clusters(map, centroids, unique.centroids, heat)
-  #Get a boolean matrix of whether two components should be combined
-  combine_cluster_bools <- combine.decision(within_cluster_dist, between_cluster_dist, range)
-  #Create the modified connected components grid
-  new_centroid <- new.centroid(combine_cluster_bools, centroids, unique.centroids, map)
-  
-  new_centroid
-}
-
-### get.unique.centroids -- a function that computes a list of unique centroids from
-#                           a matrix of centroid locations.
-#
-# parameters:
-# - map is an object of type 'map'
-# - centroids - a matrix of the centroid locations in the map
-get.unique.centroids <- function(map, centroids){
+# get.unique.centroids -- a list of unique centroid locations on the map
+get.unique.centroids <- function(map)
+{
   # get the dimensions of the map
+  centroids <- map$centroids
   xdim <- map$xdim
   ydim <- map$ydim
-  xlist <- c()
-  ylist <- c()
-  x.centroid <- centroids$centroid.x
-  y.centroid <- centroids$centroid.y
-  
-  for(ix in 1:xdim){
-    for(iy in 1:ydim) {
-      cx <- x.centroid[ix, iy]
-      cy <- y.centroid[ix, iy]
-      
-      # Check if the x or y of the current centroid is not in the list and if not
-      # append both the x and y coordinates to the respective lists
-      if(!(cx %in% xlist) || !(cy %in% ylist)){
-        xlist <- c(xlist, cx)
-        ylist <- c(ylist, cy)
+  cd.list <- c()
+  for(ix in 1:xdim)
+  {
+    for(iy in 1:ydim)
+    {
+      c.xy <- centroids[[ix, iy]]
+      b <- sapply(cd.list, function (x) {x$x == c.xy$x && x$y == c.xy$y})
+      if (!any(b))
+      {
+        cd.list <- c(cd.list,list(c.xy))
       }
     }
   }
-  
-  # return a list of unique centroid positions
-  list(position.x=xlist, position.y=ylist)
-}
-
-### distance.from.centroids -- A function to get the average distance from
-#                              centroid by cluster.
-# parameters:
-# - map is an object of type 'map'
-# - centroids - a matrix of the centroid locations in the map
-# - unique.centroids - a list of unique centroid locations
-# - heat is a unified distance matrix
-distance.from.centroids <- function(map, centroids, unique.centroids, heat){
-  xdim <- map$xdim
-  ydim <- map$ydim
-  centroids.x.positions <- unique.centroids$position.x
-  centroids.y.positions <- unique.centroids$position.y
-  within <- c()
-  
-  for (i in 1:length(centroids.x.positions)){
-    cx <- centroids.x.positions[i]
-    cy <- centroids.y.positions[i]
-    
-    # compute the average distance
-    distance <- cluster.spread(cx, cy, heat, centroids, map)
-    
-    # append the computed distance to the list of distances
-    within <- c(within, distance)
-  }
-  
-  # return the list
-  within
-}
-
-### cluster.spread -- Function to calculate the average distance in
-#                     one cluster given one centroid.
-#
-# parameters:
-# - x - x position of a unique centroid
-# - y - y position of a unique centroid
-# - umat - a unified distance matrix
-# - centroids - a matrix of the centroid locations in the map
-# - map is an object of type 'map'
-cluster.spread <- function(x, y, umat, centroids, map){
-  centroid.x <- x
-  centroid.y <- y
-  sum <- 0
-  elements <- 0
-  xdim <- map$xdim
-  ydim <- map$ydim
-  centroid_weight <- umat[centroid.x, centroid.y]
-  for(xi in 1:xdim){
-    for(yi in 1:ydim){
-      cx <- centroids$centroid.x[xi, yi]
-      cy <- centroids$centroid.y[xi, yi]
-      if(cx == centroid.x && cy == centroid.y){
-        cweight <- umat[xi,yi]
-        sum <- sum + abs(cweight - centroid_weight)
-        elements <- elements + 1
-      }
-    }
-  }
-  
-  average <- sum / elements
-  average
-}
-
-### distance.between.clusters -- A function to compute the average pairwise
-#                                distance between clusters.
-#
-# parameters:
-# - map is an object of type 'map'
-# - centroids - a matrix of the centroid locations in the map
-# - unique.centroids - a list of unique centroid locations
-# - umat - a unified distance matrix
-distance.between.clusters <- function(map, centroids, unique.centroids, umat){
-  cluster_elements <- list.clusters(map, centroids, unique.centroids, umat)
-  cluster_elements <- sapply(cluster_elements,'[',seq(max(sapply(cluster_elements,length))))
-  
-  columns <- ncol(cluster_elements)
-  
-  cluster_elements <- matrix(unlist(cluster_elements),ncol = ncol(cluster_elements),byrow = FALSE)
-  cluster_elements <- apply(combn(ncol(cluster_elements), 2), 2, function(x)
-    abs(cluster_elements[, x[1]] - cluster_elements[, x[2]]))
-  
-  mean <- colMeans(cluster_elements, na.rm=TRUE)
-  index <- 1
-  mat <- matrix(data=NA, nrow=columns, ncol=columns)
-  
-  for(xi in 1:(columns-1)){
-    for (yi in xi:(columns-1)){
-      mat[xi, yi + 1] <- mean[index]
-      mat[yi + 1, xi] <- mean[index]
-      index <- index + 1
-    }
-  }
-  
-  mat
-}
-
-### list.clusters -- A function to get the clusters as a list of lists.
-#
-# parameters:
-# - map is an object of type 'map'
-# - centroids - a matrix of the centroid locations in the map
-# - unique.centroids - a list of unique centroid locations
-# - umat - a unified distance matrix
-list.clusters <- function(map,centroids,unique.centroids,umat){
-  centroids.x.positions <- unique.centroids$position.x
-  centroids.y.positions <- unique.centroids$position.y
-  componentx <- centroids$centroid.x
-  componenty <- centroids$centroid.y
-  cluster_list <- list()
-  
-  for(i in 1:length(centroids.x.positions)){
-    cx <- centroids.x.positions[i]
-    cy <- centroids.y.positions[i]
-    
-    # get the clusters associated with a unique centroid and store it in a list
-    cluster_list[i] <- list.from.centroid(map, cx, cy, centroids, umat)
-  }
-  cluster_list
-}
-
-### list.from.centroid -- A funtion to get all cluster elements
-#                         associated to one centroid.
-#
-# parameters:
-# - map is an object of type 'map'
-# - x - the x position of a centroid
-# - y - the y position of a centroid
-# - centroids - a matrix of the centroid locations in the map
-# - umat - a unified distance matrix
-list.from.centroid <- function(map,x,y,centroids,umat){
-  centroid.x <- x
-  centroid.y <- y
-  sum <- 0
-  xdim <- map$xdim
-  ydim <- map$ydim
-  centroid_weight <- umat[centroid.x, centroid.y]
-  cluster_list <- c()
-  for(xi in 1:xdim){
-    for(yi in 1:ydim){
-      cx <- centroids$centroid.x[xi, yi]
-      cy <- centroids$centroid.y[xi, yi]
-      
-      if(cx == centroid.x && cy == centroid.y){
-        cweight <- umat[xi, yi]
-        cluster_list <- c(cluster_list, cweight)
-      }
-    }
-  }
-  list(cluster_list)
-}
-
-### combine.decision -- A function that produces a boolean matrix
-#                       representing which clusters should be combined.
-#
-# parameters:
-# - within_cluster_dist - A list of the distances from centroid to cluster elements for all centroids
-# - distance_between_clusters - A list of the average pairwise distance between clusters
-# - range is the distance where the clusters are merged together.
-combine.decision <- function(within_cluster_dist,distance_between_clusters,range){
-  inter_cluster <- distance_between_clusters
-  centroid_dist <- within_cluster_dist
-  dim <- dim(inter_cluster)[1]
-  to_combine <- matrix(data=FALSE, nrow=dim, ncol=dim)
-  for(xi in 1:dim){
-    for(yi in 1:dim){
-      cdist <- inter_cluster[xi,yi]
-      if(!is.na(cdist)){
-        rx <- centroid_dist[xi] * range
-        ry <- centroid_dist[yi] * range
-        if(cdist < (centroid_dist[xi] + rx) || cdist < (centroid_dist[yi] + ry)){
-          to_combine[xi, yi] <- TRUE
-        }
-      }
-    }
-  }
-  to_combine
-}
-
-### swap.centroids -- A function that changes every instance of a centroid to
-#                     one that it should be combined with.
-# parameters:
-# - map is an object of type 'map'
-# - x1 -
-# - y1 -
-# - x2 -
-# - y2 -
-# - centroids - a matrix of the centroid locations in the map
-swap.centroids <- function(map, x1, y1, x2, y2, centroids){
-  xdim <- map$xdim
-  ydim <- map$ydim
-  compn_x <- centroids$centroid.x
-  compn_y <- centroids$centroid.y
-  for(xi in 1:xdim){
-    for(yi in 1:ydim){
-      if(compn_x[xi] == x1 && compn_y[yi] == y1){
-        compn_x[xi] <- x2
-        compn_y[yi] <- y2
-      }
-    }
-  }
-  
-  list(centroid.x=compn_x, centroid.y=compn_y)
+  as.vector(cd.list)
 }
 
 
-### new.centroid -- A function to combine centroids based on matrix of booleans.
-#
-# parameters:
-#
-# - bmat - a boolean matrix containing the centroids to merge
-# - centroids - a matrix of the centroid locations in the map
-# - unique.centroids - a list of unique centroid locations
-# - map is an object of type 'map'
-new.centroid <- function(bmat, centroids, unique.centroids, map){
-  bmat.rows <- dim(bmat)[1]
-  bmat.columns <- dim(bmat)[2]
-  centroids_x <- unique.centroids$position.x
-  centroids_y <- unique.centroids$position.y
-  components <- centroids
-  for(xi in 1:bmat.rows){
-    for(yi in 1:bmat.columns){
-      if(bmat[xi,yi] == TRUE){
-        x1 <- centroids_x[xi]
-        y1 <- centroids_y[xi]
-        x2 <- centroids_x[yi]
-        y2 <- centroids_y[yi]
-        components <- swap.centroids(map, x1, y1, x2, y2, components)
-      }
-    }
-  }
-  components
-}
+# majority.labels -- return a map where the positions of the centroids
+# has the majority label of the appropriate cluster attached to them.
 
+none.label <- "<None>"
 
-avg.homogeneity <- function(map,explicit=FALSE,smoothing=2,merge=FALSE,merge.range=.25)
+majority.labels <- function(map)
 {
-  ### keep an unaltered copy of the unified distance matrix,
-  ### required for merging the starburst clusters
-  umat <- compute.umat(map,smoothing=smoothing)
-  
+  if (is.null(map$labels))
+  {
+    # no labels given, make up some numerical labels
+    return (numerical.labels(map))
+  }
+
   x <- map$xdim
   y <- map$ydim
+  centroids <- map$centroids
   nobs <- nrow(map$data)
   centroid.labels <- array(data=list(),dim=c(x,y))
-  
-  ### need to make sure the map doesn't have a dimension of 1
-  if (x <= 1 || y <= 1)
+  majority.labels <- array(data=none.label,dim=c(x,y))
+
+  # gather the labels from the clusters and record them
+  # at the centroid position.
+  for(i in 1:nobs)
   {
-    stop("avg.homogeneity: map dimensions too small")
+   lab <- as.character(map$labels[i,1])
+   nix <- map$fitted.obs[i]
+   c <- coordinate(map,nix)
+   ix <- c$x
+   iy <- c$y
+   cx <- centroids[[ix,iy]]$x
+   cy <- centroids[[ix,iy]]$y
+   centroid.labels[[cx,cy]] <- append(centroid.labels[[cx,cy]],lab)
   }
-  
+
+  # attach majority labels to centroids
+  for (ix in 1:x)
+  {
+   for (iy in 1:y)
+   {
+     label.v <- centroid.labels[[ix,iy]]
+     if (length(label.v)!=0)
+     {
+       majority <- data.frame(sort(table(label.v),decreasing=TRUE))
+       if (nrow(majority) == 1) # only one label
+       {
+         # just copy a label from the label vector
+         majority.labels[[ix,iy]] <- label.v[1]
+       }
+       else
+       {
+         majority.labels[[ix,iy]] <- levels(majority[1,1])[1]
+       }
+     }
+   }
+  }
+  majority.labels
+}
+
+# numerical.labels -- create labels for centroids
+numerical.labels <- function(map)
+{
+  label_cnt <- 1
+  centroids <- map$centroids
+  unique.centroids <- map$unique.centroids
+  centroid.labels <- array(data=none.label,dim=c(map$xdim,map$ydim))
+
+  # set our labels at the centroid locations
+  for (i in 1:length(unique.centroids))
+  {
+    # create a label
+    label <- paste("centroid",label_cnt,sep=" ")
+    label_cnt <- label_cnt+1
+    ix <- unique.centroids[[i]]$x
+    iy <- unique.centroids[[i]]$y
+    #cat("coord",ix,iy,label,"\n")
+    centroid.labels[[ix,iy]] <- label
+  }
+  centroid.labels
+}
+
+########################## research stuff ###########################
+
+# compute.nwcss -- compute the average within cluster sum of squares
+#                  of neuron clusters
+compute.nwcss <- function (map)
+{
+  # for each cluster gather all the point vectors that belong to that
+  # cluster into table 'vectors' making sure that the centroid vector
+  # is always the first vector in the table.  Then compute the
+  # sum square distances from the centroid to all the points.
+  # when computing the average make sure that we ignore the centroid vector.
+  clusters.ss <- c()
+  for (cluster.ix in 1:length(map$unique.centroids))
+  {
+    c.nix <- rowix(map,map$unique.centroids[[cluster.ix]])
+    vectors <- map$neurons[c.nix,]
+    for (i in 1:length(map$centroid.obs[[cluster.ix]]))
+    {
+      obs.ix <- map$centroid.obs[[cluster.ix]][i]
+      obs.nix <- map$fitted[[obs.ix]]
+      obs.coord <- coordinate(map,obs.nix)
+      centroid.coord <- map$centroids[[obs.coord$x,obs.coord$y]]
+      centroid.nix <- rowix(map,centroid.coord)
+      if (centroid.nix == c.nix){
+        vectors <- rbind(vectors,map$neurons[obs.nix,])
+      }
+    }
+    distances <- as.matrix(dist(vectors))[1,]
+    distances.sqd <- sapply(distances,function(x){x*x})
+    c.ss <- sum(distances.sqd)/(length(distances.sqd)-1)
+    clusters.ss <- c(clusters.ss,c.ss)
+  }
+  wcss <- sum(clusters.ss)/length(clusters.ss)
+  wcss
+}
+
+# avg.homogeneity -- given labels another way to ascertain quality of the map
+avg.homogeneity <- function(map)
+{
   if (is.null(map$labels))
   {
     stop("avg.homogeneity: you need to attach labels to the map")
   }
-  
-  if(!merge)
+
+  # need to make sure the map doesn't have a dimension of 1
+  if (map$xdim <= 1 || map$ydim <= 1)
   {
-    # find the centroid for each neuron on the map
-    centroids <- compute.centroids(map,umat,explicit)
+    stop("avg.homogeneity: map dimensions too small")
   }
-  else
-  {
-    # find the unique centroids for the neurons on the map
-    centroids <- compute.combined.clusters(map,umat,explicit,merge.range)
-  }
-  
-  
-  ### attach labels to centroids
+
+  x <- map$xdim
+  y <- map$ydim
+  centroids <- map$centroids
+  nobs <- nrow(map$data)
+  centroid.labels <- array(data=list(),dim=c(x,y))
+
+  #attach labels to centroids
   # count the labels in each map cell
   for(i in 1:nobs)
   {
-    lab <- as.character(map$labels[i,1])
-    nix <- map$visual[i]
-    c <- coordinate(map,nix)
-    ix <- c[1]
-    iy <- c[2]
-    cx <- centroids$centroid.x[ix,iy]
-    cy <- centroids$centroid.y[ix,iy]
-    centroid.labels[[cx,cy]] <- append(centroid.labels[[cx,cy]],lab)
+   lab <- as.character(map$labels[i,1])
+   nix <- map$fitted.obs[i]
+   c <- coordinate(map,nix)
+   ix <- c$x
+   iy <- c$y
+   cx <- centroids[[ix,iy]]$x
+   cy <- centroids[[ix,iy]]$y
+   centroid.labels[[cx,cy]] <- append(centroid.labels[[cx,cy]],lab)
   }
-  
-  ### compute average homogeneity of the map: h = (1/nobs)*sum_c majority.lahbel_c
+
+  # compute average homogeneity of the map: h = (1/nobs)*sum_c majority.label_c
   sum.majority <- 0
   n.centroids <- 0
-  
+
   for (ix in 1:x)
   {
-    for (iy in 1:y)
-    {
-      label.v <- centroid.labels[[ix,iy]]
-      if (length(label.v)!=0)
-      {
-        n.centroids <- n.centroids + 1
-        majority <- data.frame(sort(table(label.v),decreasing=TRUE))
-        
-        if (nrow(majority) == 1) # only one label
-        {
-          m.val <- length(label.v)
-        }
-        else
-        {
-          m.val <- majority[1,2]
-        }
-        sum.majority <- sum.majority + m.val
-      }
-    }
+   for (iy in 1:y)
+   {
+     label.v <- centroid.labels[[ix,iy]]
+     if (length(label.v)!=0)
+     {
+       n.centroids <- n.centroids + 1
+       majority <- data.frame(sort(table(label.v),decreasing=TRUE))
+
+       if (nrow(majority) == 1) # only one label
+       {
+         m.val <- length(label.v)
+       }
+       else
+       {
+         m.val <- majority[1,2]
+       }
+       sum.majority <- sum.majority + m.val
+     }
+   }
   }
   list(homog=sum.majority/nobs, nclust=n.centroids)
 }
