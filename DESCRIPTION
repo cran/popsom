@@ -1,6 +1,6 @@
 Package: popsom
-Version: 5.0
-Date: 2020-12-02
+Version: 5.1
+Date: 2020-12-26
 Title: Tools for Building, Visualizing, and Evaluating Self-Organizing
         Maps
 Authors@R: c(person("Lutz", "Hamel", role = c("aut", "cre"), email = "lutzhamel@uri.edu"),
@@ -16,7 +16,7 @@ Author: Lutz Hamel [aut, cre],
   Michael Eiger [aut],
   Vishakh Gopu [aut]
 Maintainer: Lutz Hamel <lutzhamel@uri.edu>
-Imports: fields, graphics, ggplot2, hash,stats,grDevices
+Imports: fields, graphics, ggplot2, hash, stats, grDevices
 Description: A self-organizing map package with three distinguishing features:
   (1) Automatic cluster centroid detection and visualization using starbursts.
   (2) Maintains two models of the data: (a) a self-organizing map model (b) a centroid based clustering model.
@@ -24,6 +24,6 @@ Description: A self-organizing map package with three distinguishing features:
 License: GPL
 URL: https://github.com/lutzhamel/popsom
 NeedsCompilation: yes
-Packaged: 2020-12-08 23:14:35 UTC; lutz
+Packaged: 2021-01-04 13:47:35 UTC; lutz
 Repository: CRAN
-Date/Publication: 2020-12-09 05:10:03 UTC
+Date/Publication: 2021-01-04 17:50:02 UTC

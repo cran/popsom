@@ -1,5 +1,5 @@
 ### map-utils.R
-# version 5.0.0
+# version 5.0.1
 # (c) 2009-2020 University of Rhode Island
 #               Lutz Hamel, Benjamin Ott, Greg Breard,
 #               Robert Tatoian, Vishakh Gopu, Michael Eiger
@@ -40,14 +40,6 @@ require(fields)
 require(graphics)
 require(ggplot2)
 require(hash)
-
-# S3 interface
-starburst <- function (map) UseMethod("starburst",map)
-fitted <- function (map) UseMethod("fitted",map)
-predict <- function (map,points) UseMethod("predict",map)
-position <- function (map,points) UseMethod("position",map)
-significance <- function (map,graphics, feature.labels) UseMethod("significance",map)
-marginal <- function (map,marginal) UseMethod("marginal",map)
 
 ### constructor ###
 
@@ -116,6 +108,7 @@ map <- function(data,
               alpha=alpha,
               train=train,
               normalize=normalize,
+              seed=seed,
               neurons=neurons)
 
   # add the class name
@@ -168,30 +161,90 @@ map <- function(data,
   return(map)
 }
 
-### implementation of S3 interface ###
-
-# starburst.map - compute and display the starburst representation of clusters
+# summary - compute a summary object
 # parameters:
-# - map is an object if type 'map'
-starburst.map <- function(map)
+#   map - an object of type 'map'
+#   verb -  a switch controlling the output
+# value:
+#   a summary object of type 'summary.map'
+summary <- function(map, verb=TRUE)
+{
+    if (class(map) != "map")
+		stop("summary: first argument is not a map object.")
+
+    value <- list()
+
+    # training parameters
+    header <- c("xdim",
+                            "ydim",
+                            "alpha",
+                            "train",
+                            "normalize",
+                            "seed",
+                            "instances")
+    v <- c(map$xdim,
+                map$ydim,
+                map$alpha,
+                map$train,
+                if (map$normalize) "TRUE" else "FALSE",
+                if (is.null(map$seed)) "NULL" else map$seed,
+                nrow(map$data))
+    df <- data.frame(t(v))
+    names(df) <- header
+    row.names(df) <- " "
+    value$training.parameters <- df
+
+    # quality assessments
+    header <- c("convergence","separation","clusters")
+    v <- c(map$convergence,
+            	1.0 - map$wcss/map$bcss,
+            	length(map$unique.centroids))
+    df <- data.frame(t(v))
+    names(df) <- header
+    row.names(df) <- " "
+    value$quality.assessments <- df
+
+    class(value) <- "summary.map"
+
+    if (verb)
+    {
+        cat("\n")
+        cat("Training Parameters:\n")
+        print(value$training.parameters)
+        cat("\n")
+
+        cat("Quality Assessments:\n")
+        print(format(value$quality.assessments,digits=2))
+        cat("\n")
+    }
+    else
+    {
+        value
+    }
+}
+
+# starburst - compute and display the starburst representation of clusters
+# parameters:
+# - map is an object of type 'map'
+starburst <- function(map)
 {
 	if (class(map) != "map")
-		stop("starburst.map: first argument is not a map object.")
+		stop("starburst: first argument is not a map object.")
 
 	plot.heat(map)
 }
 
-# significance.map - compute the relative significance of each feature and plot it
+# significance - compute the relative significance of each feature and plot it
 # parameters:
 # - map is an object if type 'map'
 # - graphics is a switch that controls whether a plot is generated or not
 # - feature.labels is a switch to allow the plotting of feature names vs feature indices
 # return value:
 # - a vector containing the significance for each feature
-significance.map <- function(map,graphics=TRUE,feature.labels=TRUE)
+significance <- function(map,graphics=TRUE,feature.labels=TRUE)
 {
 	if (class(map) != "map")
-		stop("significance.map: first argument is not a map object.")
+		stop("significance: first argument is not a map object.")
 
 	data.df <- data.frame(map$data)
 	nfeatures <- ncol(data.df)
@@ -199,9 +252,9 @@ significance.map <- function(map,graphics=TRUE,feature.labels=TRUE)
 	# Compute the variance of each feature on the map
 	var.v <- array(data=1,dim=nfeatures)
 	for (i in 1:nfeatures)
-  {
+    {
 		var.v[i] <- var(data.df[[i]]);
-	}
+    }
 
 	# we use the variance of a feature as likelihood of
 	# being an important feature, compute the Bayesian
@@ -212,7 +265,7 @@ significance.map <- function(map,graphics=TRUE,feature.labels=TRUE)
 
 	# plot the significance
 	if (graphics)
-  {
+    {
 		par.v <- map.graphics.set()
 
 		y <- max(prob.v)
@@ -235,18 +288,18 @@ significance.map <- function(map,graphics=TRUE,feature.labels=TRUE)
 		points(1:nfeatures,prob.v,type="h")
 
 		map.graphics.reset(par.v)
-	}
-  else
-  {
+    }
+    else
+    {
 		prob.v
 	}
 }
 
-# marginal.map - plot that shows the marginal probability distribution of the neurons and data
+# marginal - plot that shows the marginal probability distribution of the neurons and data
 # parameters:
 # - map is an object of type 'map'
 # - marginal is the name of a training data frame dimension or index
-marginal.map <- function(map,marginal)
+marginal <- function(map,marginal)
 {
   # ensure that map is a 'map' object
   if (class(map) != "map")
@@ -284,15 +337,15 @@ marginal.map <- function(map,marginal)
   }
 }
 
-# fitted.map -- returns a vector of labels assigned to the observations
+# fitted -- returns a vector of labels assigned to the observations
 # parameters:
 # - map is an object of type 'map'
 # value:
 # - a vector of labels
-fitted.map <- function(map)
+fitted <- function(map)
 {
   if (class(map) != "map")
-    stop("fitted.map: first argument is not a map object.")
+    stop("fitted: first argument is not a map object.")
 
   nobs <- length(map$fitted.obs)
   labels <- c()
@@ -310,22 +363,22 @@ fitted.map <- function(map)
   labels
 }
 
-# predict.map -- returns classification labels for points in DF
+# predict -- returns classification labels for points in DF
 # parameters:
 # - map -- map object
 # - points  -- data frame of points to be classified
 # value:
 # - the label of the centroid x belongs to
-predict.map <- function (map,points)
+predict<- function (map,points)
 {
   # local function to do the actual prediction
   predict.point <- function (x)
   {
     if (!is.vector(x))
-      stop("predict.map: argument has to be a vector.")
+      stop("predict: argument has to be a vector.")
 
     if (length(x) != ncol(map$data))
-      stop("predict.map: vector dimensionality is incompatible")
+      stop("predict vector dimensionality is incompatible")
 
     if (map$normalize)
       x <- as.vector(map.normalize(x))
@@ -372,22 +425,22 @@ predict.map <- function (map,points)
   m
 }
 
-# position.map -- return the position of points on the map
+# position-- return the position of points on the map
 # parameters:
 # - map -- map object
 # - points   -- a data frame of points to be mapped
 # value:
 # - x-y coordinates of points in points
-position.map <- function (map,points)
+position <- function (map,points)
 {
   # local function to positon a point on the map
   position.point <- function(x)
   {
     if (!is.vector(x))
-      stop("position.map: argument has to be a vector.")
+      stop("position: argument has to be a vector.")
 
     if (length(x) != ncol(map$data))
-      stop("position.map: vector dimensionality is incompatible")
+      stop("position: vector dimensionality is incompatible")
 
     if (map$normalize)
       x <- as.vector(map.normalize(x))
@@ -664,7 +717,7 @@ map.embed.vm <- function(map,conf.int=.95,verb=FALSE)
 
     # compute the variance captured by the map -- but only if the means have converged as well.
     nfeatures <- ncol(map.df)
-    prob.v <- significance.map(map,graphics=FALSE)
+    prob.v <- significance(map,graphics=FALSE)
     var.sum <- 0
 
     for (i in 1:nfeatures)
@@ -717,7 +770,7 @@ map.embed.ks <- function(map,conf.int=.95,verb=FALSE)
       ks.vector[[i]] <- suppressWarnings(ks.test(map.df[[i]], data.df[[i]]))
   }
 
-  prob.v <- significance.map(map,graphics=FALSE)
+  prob.v <- significance(map,graphics=FALSE)
   var.sum <- 0
 
   # compute the variance captured by the map

@@ -1,10 +1,9 @@
 \name{predict}
 \alias{predict}
-\alias{predict.map}
 \title{Compute Classification Labels for Given Points}
 \description{Compute classification labels for points in a given data frame using the underlying clustering model.  If the training data is unlabeled then generated labels are used.}
 \usage{
-\S3method{predict}{map}(map,points)
+predict(map,points)
 }
 \arguments{
   \item{map}{An object of type 'map'.}

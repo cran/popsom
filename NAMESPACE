@@ -1,22 +1,18 @@
 useDynLib(popsom, .registration = TRUE)
+
 import(graphics,ggplot2)
+
 importFrom("grDevices", "heat.colors")
 importFrom("stats", "dist", "ks.test", "runif", "t.test", "var", "var.test")
 importFrom("fields","smooth.2d")
 importFrom("hash","hash")
 
+# function exports
 export("map")
-
-export("starburst")
 export("fitted")
-export("predict")
-export("position")
-export("significance")
 export("marginal")
-
-S3method("starburst","map")
-S3method("fitted","map")
-S3method("predict","map")
-S3method("position","map")
-S3method("significance","map")
-S3method("marginal","map")
+export("position")
+export("predict")
+export("significance")
+export("starburst")
+export("summary")

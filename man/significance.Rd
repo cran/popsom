@@ -1,10 +1,9 @@
 \name{significance}
 \alias{significance}
-\alias{significance.map}
 \title{Compute Significance Of Features}
 \description{Computes the relative significance of each feature and plots it.}
 \usage{
-\S3method{significance}{map}(map,graphics=TRUE,feature.labels=TRUE)
+significance(map,graphics=TRUE,feature.labels=TRUE)
 }
 \arguments{
   \item{map}{An object of type 'map'.}
@@ -16,7 +15,7 @@
 variance.}
 
 \references{
-"Bayesian Probability Approach to Feature Significance for Infrared Spectra of Bacteria,"
+Bayesian Probability Approach to Feature Significance for Infrared Spectra of Bacteria,
 Lutz Hamel, Chris W. Brown, Applied Spectroscopy, Volume 66, Number 1, 2012.
 }
 \author{Lutz Hamel}

@@ -1,10 +1,9 @@
 \name{position}
 \alias{position}
-\alias{position.map}
 \title{Compute Map Positions for Given Points}
 \description{Compute the (x,y)-positions of points on the map.}
 \usage{
-\S3method{position}{map}(map,points)
+position(map,points)
 }
 \arguments{
   \item{map}{An object of type 'map'.}
